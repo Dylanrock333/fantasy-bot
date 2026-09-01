@@ -11,6 +11,7 @@
 
     START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality -> END
 """
+#TODO make charts with llm if asked to 
 import os
 import time
 from datetime import datetime
@@ -63,20 +64,58 @@ _CATEGORY_LIST = "\n".join(
     f"- {name}: {desc}" for name, desc in CATEGORY_DESCRIPTIONS.items()
 )
 
-SUPERVISOR_SYSTEM = SystemMessage(content=(
-    "You classify a fantasy football chat bot's incoming message into zero "
-    "or more data categories. Categories prefixed 'fantasy_' are the user's "
-    "private fantasy league; categories prefixed 'nfl_' are real-world NFL "
-    "data. Available categories:\n" + _CATEGORY_LIST + "\n\n"
-    "Pick every category needed to answer (e.g. a roster + injury question "
-    "needs both 'fantasy_roster' and 'nfl_team'). Pick none for greetings, "
-    "opinions, or follow-up chat that needs no new data."
-))
+
+def _today() -> str:
+    return datetime.now().strftime("%A, %Y-%m-%d")
+
+
+def _supervisor_system() -> SystemMessage:
+    return SystemMessage(content=(
+        f"Today's date is {_today()}. Use it to judge what 'today', 'this "
+        "week', 'tonight', or 'currently' mean in the message, and factor that "
+        "into your reasoning (e.g. 'today' needs that specific date's games, "
+        "not just the general schedule).\n\n"
+        "You classify a fantasy football chat bot's incoming message into zero "
+        "or more data categories. Categories prefixed 'fantasy_' are the user's "
+        "private fantasy league; categories prefixed 'nfl_' are real-world NFL "
+        "data. Available categories:\n" + _CATEGORY_LIST + "\n\n"
+        "First write `reasoning`: think concretely about what would actually "
+        "prove an answer - which specific stats, which teams/players, what "
+        "angle (season totals? a single matchup? recent form?) - not just "
+        "which topic the message is about. A comparison needs comparable data "
+        "for both sides; a recommendation needs the factors that would change "
+        "the recommendation. Then pick every category needed to gather that "
+        "data, and skip any category that wouldn't add anything. Pick no "
+        "categories for greetings, opinions, or follow-up chat that needs no "
+        "new data.\n\n"
+        "Examples:\n"
+        "Q: \"Who has the better defense, Vikings or Jaguars?\"\n"
+        "reasoning: A defense comparison needs actual defensive production for "
+        "both teams - sacks, takeaways, tackles for loss, passes defended - "
+        "not just win-loss record or injuries. Team season stats settle the "
+        "core question; standout defensive players add supporting detail.\n"
+        "categories: [nfl_team, nfl_player]\n\n"
+        "Q: \"Should I start my RB2 this week?\"\n"
+        "reasoning: A start/sit call depends on three things at once: whether "
+        "the player is actually mine and healthy, his recent real-world form, "
+        "and how tough the opponent he's facing is. That's my roster, his "
+        "player stats, and the opposing team's data - missing any one makes "
+        "the recommendation a guess.\n"
+        "categories: [fantasy_roster, nfl_player, nfl_team]\n\n"
+        "Q: \"What's Justin Jefferson's stat line this season?\"\n"
+        "reasoning: A single player's own season numbers - no comparison, no "
+        "team context, no fantasy-league angle needed.\n"
+        "categories: [nfl_player]\n\n"
+        "Q: \"Haha nice, thanks!\"\n"
+        "reasoning: Acknowledgment/follow-up chat with no factual claim behind "
+        "it - there's nothing to fetch.\n"
+        "categories: []"
+    ))
+
 
 def _personality_system() -> SystemMessage:
-    today = datetime.now().strftime("%Y-%m-%d")
     return SystemMessage(content=(
-        f"Today's date is {today}. You are the voice of a fantasy football "
+        f"Today's date is {_today()}. You are the voice of a fantasy football "
         "chat bot: sharp, confident, a little witty, but never rambling.\n\n"
         "HARD RULE: every fact, name, number, or claim in your reply must "
         "come from the tool results gathered earlier in this conversation. "
@@ -89,7 +128,7 @@ def _personality_system() -> SystemMessage:
         "assumption, or 'usually.' If the gathered data doesn't cover part "
         "of the question, say so explicitly (e.g. 'no coach data was "
         "pulled for this') rather than guessing.\n\n"
-        "Keep replies SHORT: 1-4 sentences by default, and never more than "
+        "Keep replies SHORT: 2-5 sentences by default, and never more than "
         "a tight bulleted list for things like standings or rosters. No "
         "filler, no restating the question, no disclaimers beyond flagging "
         "genuinely missing data. Label every bare number with a short unit "
@@ -101,6 +140,11 @@ def _personality_system() -> SystemMessage:
 
 
 class CategoryChoice(BaseModel):
+    reasoning: str = Field(
+        description="One or two sentences on what data would actually "
+        "answer this well - which stats/teams/players and what angle - "
+        "decided before picking categories.",
+    )
     categories: List[str] = Field(
         default_factory=list,
         description="Subset of the available category names needed to answer.",
@@ -110,6 +154,7 @@ class CategoryChoice(BaseModel):
 class AgentState(MessagesState):
     categories: List[str]
     category: str
+    reasoning: str
 
 
 def supervisor_node(state: AgentState):
@@ -117,7 +162,7 @@ def supervisor_node(state: AgentState):
     t0 = time.monotonic()
     choice = invoke_with_fallback(
         lambda key: ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).with_structured_output(CategoryChoice),
-        [SUPERVISOR_SYSTEM] + state["messages"],
+        [_supervisor_system()] + state["messages"],
     )
     valid = [c for c in choice.categories if c in CATEGORY_REGISTRY]
     emit(
@@ -125,15 +170,20 @@ def supervisor_node(state: AgentState):
         node="supervisor",
         duration_ms=int((time.monotonic() - t0) * 1000),
         categories=valid,
+        reasoning=choice.reasoning,
     )
-    return {"categories": valid}
+    return {"categories": valid, "reasoning": choice.reasoning}
 
 
 def route_to_categories(state: AgentState):
     if not state["categories"]:
         return "personality"
     return [
-        Send("run_category", {"messages": state["messages"], "category": c})
+        Send("run_category", {
+            "messages": state["messages"],
+            "category": c,
+            "reasoning": state["reasoning"],
+        })
         for c in state["categories"]
     ]
 
@@ -143,9 +193,11 @@ def run_category_node(state: AgentState):
     tools = CATEGORY_REGISTRY[category]
     tool_node = ToolNode(tools, handle_tool_errors=True)
     system = SystemMessage(content=(
-        f"You retrieve data for the '{category}' category using only the "
-        "tools provided. Call whatever tools are needed, then stop - never "
-        "write a summary or answer yourself."
+        f"Today's date is {_today()}. You retrieve data for the "
+        f"'{category}' category using only the tools provided. The "
+        f"supervisor's plan for this question: \"{state['reasoning']}\"\n"
+        "Call whatever tools serve that plan, then stop - never write a "
+        "summary or answer yourself."
     ))
 
     emit("node_start", node="run_category", category=category)
@@ -163,15 +215,20 @@ def run_category_node(state: AgentState):
             break
         for tc in response.tool_calls:
             emit("tool_call", category=category, name=tc["name"], args=tc["args"])
-        results = tool_node.invoke({"messages": [response]})["messages"]
-        for m in results:
-            emit(
-                "tool_result",
-                category=category,
-                name=getattr(m, "name", None),
-                result=str(m.content)[:TRACE_TRUNCATE],
-            )
-        local.extend(results)
+            tc_t0 = time.monotonic()
+            results = tool_node.invoke(
+                {"messages": [AIMessage(content="", tool_calls=[tc])]}
+            )["messages"]
+            tc_duration_ms = int((time.monotonic() - tc_t0) * 1000)
+            for m in results:
+                emit(
+                    "tool_result",
+                    category=category,
+                    name=getattr(m, "name", None),
+                    result=str(m.content)[:TRACE_TRUNCATE],
+                    duration_ms=tc_duration_ms,
+                )
+            local.extend(results)
     emit(
         "node_end",
         node="run_category",

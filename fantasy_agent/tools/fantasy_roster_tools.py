@@ -56,6 +56,21 @@ def get_league_settings() -> str:
 
 
 @tool
+def get_scoring_rules() -> str:
+    """Get this fantasy league's actual point values per stat (e.g. points
+    per reception, per passing/rushing/receiving TD, per interception, D/ST
+    points-allowed tiers). Use this for "what's worth the most points" or
+    "is this a PPR league" style questions - get_league_settings only covers
+    roster format, not scoring."""
+    league = league_singleton()
+    items = [i for i in league.settings.scoring_format if i.get("points")]
+    if not items:
+        return "No scoring rules found for this league."
+    lines = [f"{i['label']}: {i['points']:+g}" for i in items]
+    return "Scoring rules (non-zero only):\n" + "\n".join(lines)
+
+
+@tool
 def get_draft_results() -> str:
     """Get the results of this league's draft (who picked which player,
     round/pick number). Returns a friendly message if the draft hasn't
@@ -69,4 +84,4 @@ def get_draft_results() -> str:
     return "Draft results:\n" + "\n".join(lines)
 
 
-TOOLS = [get_team_roster, get_league_settings, get_draft_results]
+TOOLS = [get_team_roster, get_league_settings, get_scoring_rules, get_draft_results]

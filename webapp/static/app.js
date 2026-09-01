@@ -123,6 +123,9 @@ function addTraceEvent(evt) {
           ? "categories: " + evt.categories.join(", ")
           : "categories: (none)";
       }
+      if (evt.reasoning) {
+        detail = (detail ? detail + "\n" : "") + `reasoning: ${evt.reasoning}`;
+      }
       if (evt.tool_rounds !== undefined) {
         detail = (detail ? detail + "\n" : "") + `tool rounds: ${evt.tool_rounds}`;
       }
@@ -135,7 +138,7 @@ function addTraceEvent(evt) {
       detail = fmtArgs(evt.args);
       break;
     case "tool_result":
-      label = `← ${evt.category}.${evt.name || ""}`;
+      label = `← ${evt.category}.${evt.name || ""}${evt.duration_ms !== undefined ? ` — ${evt.duration_ms}ms` : ""}`;
       detail = evt.result;
       break;
     case "node_warning":

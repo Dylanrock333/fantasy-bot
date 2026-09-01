@@ -1,5 +1,6 @@
 """Real-NFL data: team identity, rosters, schedules, records, injuries,
-depth charts, and league conference/division structure (public
+depth charts, season offensive/defensive statistics (points, yards, sacks,
+takeaways, etc.), and league conference/division structure (public
 espn_nfl_public/ API, not your fantasy rosters - see fantasy_roster_tools.py
 for that)."""
 from langchain_core.tools import tool
@@ -35,6 +36,56 @@ def get_team_info(team_name: str) -> str:
     return (
         f"{t['displayName']} ({t['abbreviation']}): record {record_str}, "
         f"based in {t['location']}, home venue {venue}."
+    )
+
+
+@tool
+def get_team_stats(team_name: str) -> str:
+    """Get a real-NFL team's season offensive and defensive statistics -
+    points scored, total/passing/rushing yards on offense, and defensive
+    production (sacks, tackles for loss, interceptions, passes defended,
+    forced/recovered fumbles). Use this (not get_team_info, which is
+    record/venue only) to compare two teams' offense or defense, e.g.
+    team_name='Cowboys' or 'DAL'."""
+    team = resolve_team(team_name)
+    if team is None:
+        return f"No NFL team matched '{team_name}'."
+    data = get_json(f"{SITE_API}/teams/{team['id']}/statistics")
+    categories = {
+        c["name"]: c
+        for c in data.get("results", {}).get("stats", {}).get("categories", [])
+    }
+    if not categories:
+        return f"No statistics available for {team['displayName']}."
+
+    def stat(cat_name: str, stat_name: str) -> str | None:
+        for s in categories.get(cat_name, {}).get("stats", []):
+            if s["name"] == stat_name:
+                return s["displayValue"]
+        return None
+
+    offense = {
+        "Points scored": stat("scoring", "totalPoints"),
+        "Total yards": stat("rushing", "totalYards"),
+        "Passing yards": stat("passing", "netPassingYards"),
+        "Rushing yards": stat("rushing", "rushingYards"),
+        "Passing TDs": stat("passing", "passingTouchdowns"),
+        "Rushing TDs": stat("rushing", "rushingTouchdowns"),
+    }
+    defense = {
+        "Sacks": stat("defensive", "sacks"),
+        "Tackles for loss": stat("defensive", "tacklesForLoss"),
+        "Interceptions": stat("defensiveInterceptions", "interceptions"),
+        "Passes defended": stat("defensive", "passesDefended"),
+        "Fumbles forced": stat("general", "fumblesForced"),
+        "Fumbles recovered": stat("general", "fumblesRecovered"),
+    }
+    off_str = ", ".join(f"{k}: {v}" for k, v in offense.items() if v is not None)
+    def_str = ", ".join(f"{k}: {v}" for k, v in defense.items() if v is not None)
+    return (
+        f"{team['displayName']} season stats\n"
+        f"Offense: {off_str}\n"
+        f"Defense (production, not points/yards allowed): {def_str}"
     )
 
 
@@ -155,6 +206,7 @@ def get_team_depth_chart(team_name: str) -> str:
 TOOLS = [
     get_nfl_teams,
     get_team_info,
+    get_team_stats,
     get_team_coach,
     get_nfl_team_roster,
     get_team_schedule,
