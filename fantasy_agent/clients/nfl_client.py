@@ -10,6 +10,7 @@ No API key, espn_s2, or SWID required — contrast with fantasy_espn/espn_client
 which authenticates against your private fantasy league.
 """
 import requests
+from rapidfuzz import fuzz, process
 
 SITE_API = "https://site.api.espn.com/apis/site/v2/sports/football/nfl"
 SITE_API_STANDINGS = "https://site.api.espn.com/apis/v2/sports/football/nfl"
@@ -38,7 +39,8 @@ _team_cache: list[dict] | None = None
 
 def resolve_team(query: str) -> dict | None:
     """Look up a team by name/city/abbreviation (case-insensitive substring
-    match), e.g. 'cowboys', 'DAL', 'dallas'. Caches the team list for the
+    match, falling back to fuzzy matching for typos), e.g. 'cowboys', 'DAL',
+    'dallas', or a misspelling like 'dalas'. Caches the team list for the
     process lifetime since it's static within a season (32 teams total)."""
     global _team_cache
     if _team_cache is None:
@@ -52,7 +54,9 @@ def resolve_team(query: str) -> dict | None:
     for team in _team_cache:
         if q in team["displayName"].lower():
             return team
-    return None
+    names = [team["displayName"].lower() for team in _team_cache]
+    match = process.extractOne(q, names, scorer=fuzz.WRatio, score_cutoff=70)
+    return _team_cache[match[2]] if match else None
 
 
 # Per-team roster cache, populated lazily (only for teams actually looked
@@ -63,10 +67,12 @@ _roster_cache: dict[str, list[dict]] = {}
 
 
 def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
-    """Look up a real-NFL athlete's public-API id by team + name, e.g.
-    pro_team='DAL', player_name='Dak Prescott'. The public athlete id is a
-    different id space than the fantasy playerId from espn_api - this is
-    the only reliable way to bridge the two without a full player cache."""
+    """Look up a real-NFL athlete's public-API id by team + name (substring
+    match, falling back to fuzzy matching for typos), e.g. pro_team='DAL',
+    player_name='Dak Prescott' or a misspelling like 'Dak Prescot'. The
+    public athlete id is a different id space than the fantasy playerId
+    from espn_api - this is the only reliable way to bridge the two
+    without a full player cache."""
     team = resolve_team(pro_team)
     if team is None:
         return None
@@ -82,7 +88,9 @@ def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
     for p in _roster_cache[team_id]:
         if q == p["fullName"].lower() or q in p["fullName"].lower():
             return p
-    return None
+    names = [p["fullName"].lower() for p in _roster_cache[team_id]]
+    match = process.extractOne(q, names, scorer=fuzz.WRatio, score_cutoff=80)
+    return _roster_cache[team_id][match[2]] if match else None
 
 
 def resolve_event(pro_team: str, week: int = 0) -> str | None:

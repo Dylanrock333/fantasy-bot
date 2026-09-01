@@ -31,7 +31,7 @@ graph pick it up automatically.
 
 1. Add your key to `.env` (already has an empty placeholder):
    ```
-   ANTHROPIC_API_KEY=sk-ant-...
+   GOOGLE_API_KEY=AIza...
    ```
 2. Run:
    ```bash

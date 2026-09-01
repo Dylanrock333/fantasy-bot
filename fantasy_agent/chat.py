@@ -19,8 +19,8 @@ from fantasy_agent.graph import build_graph  # noqa: E402  (after load_dotenv)
 
 
 def main():
-    if not (ROOT / ".env").exists() or "ANTHROPIC_API_KEY" not in (ROOT / ".env").read_text():
-        print("Warning: ANTHROPIC_API_KEY not found in .env - set it before chatting.\n")
+    if not (ROOT / ".env").exists() or "GOOGLE_API_KEY" not in (ROOT / ".env").read_text():
+        print("Warning: GOOGLE_API_KEY not found in .env - set it before chatting.\n")
 
     graph = build_graph()
     messages = []

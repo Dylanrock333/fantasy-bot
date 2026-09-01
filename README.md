@@ -44,9 +44,9 @@ python3 -m venv venv && venv/bin/pip install -r requirements.txt
 
 `.env` (gitignored) needs:
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_API_KEY_BACKUP=sk-ant-...   # optional - graph.py retries on this if the
-                                       # primary key is rate-limited or out of credits
+GOOGLE_API_KEY=AIza...
+GOOGLE_API_KEY_BACKUP=AIza...          # optional - graph.py retries on this if the
+                                        # primary key is rate-limited or out of quota
 ESPN_S2=...                           # from your browser's espn.com cookies, private league auth
 SWID=...                              # same
 ```

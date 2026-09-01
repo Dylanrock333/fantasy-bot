@@ -16,8 +16,8 @@ import time
 from datetime import datetime
 from typing import List
 
-import anthropic
-from langchain_anthropic import ChatAnthropic
+from google.genai.errors import APIError as GoogleAPIError
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode
@@ -29,18 +29,18 @@ from fantasy_agent.trace import emit
 
 TRACE_TRUNCATE = 800
 
-MODEL = os.environ.get("FANTASY_AGENT_MODEL", "claude-haiku-4-5")
+MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.5-flash")
 MAX_TOOL_ROUNDS = 4
 
-PRIMARY_KEY = os.environ.get("ANTHROPIC_API_KEY")
-BACKUP_KEY = os.environ.get("ANTHROPIC_API_KEY_BACKUP")
+PRIMARY_KEY = os.environ.get("GOOGLE_API_KEY")
+BACKUP_KEY = os.environ.get("GOOGLE_API_KEY_BACKUP")
 
 
 def _is_exhausted(err: Exception) -> bool:
     """True for errors a backup account/key could plausibly fix."""
-    if isinstance(err, anthropic.RateLimitError):
-        return True
-    if isinstance(err, anthropic.BadRequestError):
+    if isinstance(err, GoogleAPIError):
+        if err.code == 429:  # rate limited or quota exceeded
+            return True
         msg = str(err).lower()
         return "credit balance" in msg or "quota" in msg
     return False
@@ -48,14 +48,14 @@ def _is_exhausted(err: Exception) -> bool:
 
 def invoke_with_fallback(build_llm, *args, **kwargs):
     """Call build_llm(api_key).invoke(*args, **kwargs), retrying once against
-    ANTHROPIC_API_KEY_BACKUP if the primary key is rate-limited or out of credits.
+    GOOGLE_API_KEY_BACKUP if the primary key is rate-limited or out of credits.
     """
     try:
         return build_llm(PRIMARY_KEY).invoke(*args, **kwargs)
     except Exception as err:
         if not BACKUP_KEY or not _is_exhausted(err):
             raise
-        print(f"[fallback] primary Anthropic key failed ({err}); retrying with backup key")
+        print(f"[fallback] primary Gemini key failed ({err}); retrying with backup key")
         return build_llm(BACKUP_KEY).invoke(*args, **kwargs)
 
 
@@ -116,7 +116,7 @@ def supervisor_node(state: AgentState):
     emit("node_start", node="supervisor")
     t0 = time.monotonic()
     choice = invoke_with_fallback(
-        lambda key: ChatAnthropic(model=MODEL, api_key=key).with_structured_output(CategoryChoice),
+        lambda key: ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).with_structured_output(CategoryChoice),
         [SUPERVISOR_SYSTEM] + state["messages"],
     )
     valid = [c for c in choice.categories if c in CATEGORY_REGISTRY]
@@ -155,7 +155,7 @@ def run_category_node(state: AgentState):
     for _ in range(MAX_TOOL_ROUNDS):
         rounds += 1
         response = invoke_with_fallback(
-            lambda key: ChatAnthropic(model=MODEL, api_key=key).bind_tools(tools),
+            lambda key: ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).bind_tools(tools),
             [system] + state["messages"] + local,
         )
         local.append(response)
@@ -207,12 +207,10 @@ def personality_node(state: AgentState):
 
     def _stream(key):
         # Build the reply as a plain string rather than merging raw
-        # AIMessageChunks: Anthropic's streaming deltas can merge into a
-        # message with a stray empty text content block, which the API then
-        # rejects ("text content blocks must be non-empty") the next time
-        # this stored message is resent as conversation history.
+        # AIMessageChunks, to avoid re-sending provider-specific chunk
+        # artifacts back as conversation history.
         parts = []
-        for chunk in ChatAnthropic(model=MODEL, api_key=key).stream(context):
+        for chunk in ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).stream(context):
             text = _chunk_text(chunk)
             if text:
                 parts.append(text)

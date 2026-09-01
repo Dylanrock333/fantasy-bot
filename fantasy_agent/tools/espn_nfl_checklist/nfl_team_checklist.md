@@ -30,7 +30,7 @@ Base: `https://site.api.espn.com/apis/site/v2/sports/football/nfl/{resource}`
   - Params: `{id}` (team ID)
   - Summary: Returns the team's full active roster grouped by position, plus coaching staff.
   - Returns: Team roster — `{timestamp: str, status: dict, season: dict, athletes: list[dict], coach: list[dict], team: dict}`. `athletes` is grouped by position (6 groups for team 6, e.g. offense/defense/special teams/etc.), each `{position: str, items: list[dict]}` where `items` are player objects.
-  - Wired: `nfl_team_tools.get_nfl_team_roster` (named with an `nfl_` infix, not `get_team_roster`, to avoid colliding with the fantasy-roster tool of that name in `fantasy_roster_tools.py`)
+  - Wired: `nfl_team_tools.get_nfl_team_roster` (named with an `nfl_` infix, not `get_team_roster`, to avoid colliding with the fantasy-roster tool of that name in `fantasy_roster_tools.py`). Also separately wired as `nfl_team_tools.get_team_coach`, which hits this same endpoint but extracts just the `coach` field for a standalone "who's the head coach" chat query.
 
 - [x] `GET teams/{id}/schedule`
   - Params: `{id}` (team ID)

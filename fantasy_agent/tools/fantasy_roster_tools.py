@@ -4,6 +4,7 @@ charts)."""
 from datetime import datetime
 
 from langchain_core.tools import tool
+from rapidfuzz import fuzz, process
 
 from ..clients.fantasy_client import league_singleton
 
@@ -11,10 +12,16 @@ from ..clients.fantasy_client import league_singleton
 @tool
 def get_team_roster(team_name: str) -> str:
     """Get the fantasy roster for one of your league's teams. team_name can
-    be a partial match, e.g. 'Cowboys' or part of the manager's team name."""
+    be a partial match, e.g. 'Cowboys' or part of the manager's team name,
+    and typos are tolerated via fuzzy matching."""
     league = league_singleton()
     q = team_name.strip().lower()
     team = next((t for t in league.teams if q in t.team_name.lower()), None)
+    if team is None:
+        names = [t.team_name.lower() for t in league.teams]
+        match = process.extractOne(q, names, scorer=fuzz.WRatio, score_cutoff=75)
+        if match:
+            team = league.teams[match[2]]
     if team is None:
         names = ", ".join(t.team_name for t in league.teams)
         return f"No fantasy team matched '{team_name}'. Known teams: {names}"
