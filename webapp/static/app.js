@@ -244,7 +244,9 @@ function applyTraceCollapsed(collapsed) {
   toggleTraceBtn.textContent = collapsed ? "Show trace" : "Hide trace";
 }
 
-let traceCollapsed = localStorage.getItem("traceCollapsed") === "true";
+const storedTraceCollapsed = localStorage.getItem("traceCollapsed");
+const isMobile = window.matchMedia("(max-width: 768px)").matches;
+let traceCollapsed = storedTraceCollapsed === null ? isMobile : storedTraceCollapsed === "true";
 applyTraceCollapsed(traceCollapsed);
 
 toggleTraceBtn.addEventListener("click", () => {

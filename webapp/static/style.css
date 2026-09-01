@@ -28,6 +28,7 @@ html, body {
 .layout {
   display: flex;
   height: 100vh;
+  height: 100dvh;
 }
 
 /* ---------- chat pane ---------- */
@@ -221,4 +222,80 @@ html, body {
 .trace-empty {
   color: var(--text-dim);
   padding: 12px 8px;
+}
+
+/* ---------- mobile ---------- */
+
+@media (max-width: 768px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .chat-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .chat-header, .trace-header {
+    padding: 10px 14px;
+  }
+
+  .chat-header span, .trace-header span {
+    font-size: 13px;
+  }
+
+  .chat-header button, .trace-header button {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .chat {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .msg {
+    max-width: 88%;
+    font-size: 15px;
+    padding: 9px 12px;
+  }
+
+  .composer {
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    gap: 6px;
+  }
+
+  .composer input {
+    min-height: 44px;
+    font-size: 16px; /* keep at 16px+ so iOS Safari doesn't auto-zoom on focus */
+  }
+
+  .composer button {
+    min-height: 44px;
+    padding: 0 16px;
+  }
+
+  /* trace becomes a bottom drawer instead of a side panel; width-based
+     collapse (flex-basis) doesn't apply once the layout is a column, so
+     collapse by height instead. */
+  .trace-pane {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    max-height: 42vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    transition: max-height 0.15s ease, border-color 0.15s ease;
+  }
+
+  .trace-pane.collapsed {
+    max-height: 0;
+    border-top-color: transparent;
+  }
+
+  .trace {
+    padding: 10px;
+    font-size: 11px;
+  }
 }

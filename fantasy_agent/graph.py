@@ -29,7 +29,7 @@ from fantasy_agent.trace import emit
 
 TRACE_TRUNCATE = 800
 
-MODEL = os.environ.get("FANTASY_AGENT_MODEL", "claude-sonnet-5")
+MODEL = os.environ.get("FANTASY_AGENT_MODEL", "claude-haiku-4-5")
 MAX_TOOL_ROUNDS = 4
 
 PRIMARY_KEY = os.environ.get("ANTHROPIC_API_KEY")
