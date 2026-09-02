@@ -11,7 +11,6 @@
 
     START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality -> END
 """
-#TODO make charts with llm if asked to 
 import os
 import time
 from datetime import datetime
@@ -102,6 +101,12 @@ def _supervisor_system() -> SystemMessage:
         "player stats, and the opposing team's data - missing any one makes "
         "the recommendation a guess.\n"
         "categories: [fantasy_roster, nfl_player, nfl_team]\n\n"
+        "Note: fantasy team names (e.g. \"Hurts Cooks with Lamb\") are "
+        "user-chosen nicknames, often punning on player surnames - they "
+        "are not player names or actual rosters. Whenever a question "
+        "names specific fantasy teams and needs to know who's on them, "
+        "include fantasy_roster so the real roster is fetched instead of "
+        "guessed from the team name.\n\n"
         "Q: \"What's Justin Jefferson's stat line this season?\"\n"
         "reasoning: A single player's own season numbers - no comparison, no "
         "team context, no fantasy-league angle needed.\n"
@@ -135,7 +140,33 @@ def _personality_system() -> SystemMessage:
         "so it's never ambiguous - e.g. '364.9 pts' not '(364.9)', '75 rec "
         "/ 1,077 yds / 3 TD' not '75/1,077/3', '6 playoff teams'. "
         "Abbreviations are fine (pts, yds, rec, TD), just never leave a "
-        "number floating with no label."
+        "number floating with no label.\n\n"
+        "You must always write a reply, even when no tool data was "
+        "gathered - greetings, thanks, opinions, meta questions about the "
+        "conversation, and non-football questions all still get a short, "
+        "in-character response using only the conversation itself. Never "
+        "produce an empty or whitespace-only reply.\n\n"
+        "CHARTS: if the user explicitly asks to see something as a chart, "
+        "graph, or visual comparison, emit exactly one fenced code block "
+        "labeled `chart` (```chart ... ```) containing a single JSON "
+        "object and nothing else inside the fence. Two shapes are "
+        "supported:\n"
+        "- Comparing two or more things across several differently-scaled "
+        "metrics (e.g. two teams' full stat lines): "
+        '{"type": "comparison", "title": "...", "series": ["Name A", '
+        '"Name B"], "rows": [{"label": "Points Scored", "unit": "pts", '
+        '"values": [344, 474]}, ...]}. Each row is scaled to its own max, '
+        "so wildly different units (points vs. sacks) both stay readable.\n"
+        "- One metric across several categories, all in the same unit "
+        '(e.g. targets per WR): {"type": "bar", "title": "...", "unit": '
+        '"tgt", "categories": ["Name A", "Name B"], "series": [{"name": '
+        '"Targets", "values": [141, 98]}]}. All values share one scale, '
+        "and `series` may hold more than one line for a grouped chart.\n"
+        "Values must be raw numbers (no commas or unit text baked in) - "
+        "put the unit in the `unit` field. You may add one short sentence "
+        "of framing text before the code block, but never restate the "
+        "chart's numbers again in prose below it, and never emit a chart "
+        "block unless a chart/graph was actually requested."
     ))
 
 
@@ -196,6 +227,12 @@ def run_category_node(state: AgentState):
         f"Today's date is {_today()}. You retrieve data for the "
         f"'{category}' category using only the tools provided. The "
         f"supervisor's plan for this question: \"{state['reasoning']}\"\n"
+        "Fantasy team/league names (e.g. \"Hurts Cooks with Lamb\") are "
+        "arbitrary nicknames the user picked, often puns on player "
+        "surnames - never infer a real player's identity from a substring "
+        "of a team name, and never treat a team name as a player or user "
+        "name. Only trust players confirmed via fantasy_roster or "
+        "matchup/box-score tool output.\n"
         "Call whatever tools serve that plan, then stop - never write a "
         "summary or answer yourself."
     ))
@@ -214,19 +251,22 @@ def run_category_node(state: AgentState):
         if not response.tool_calls:
             break
         for tc in response.tool_calls:
-            emit("tool_call", category=category, name=tc["name"], args=tc["args"])
+            emit("tool_call", category=category, name=tc["name"], args=tc["args"], round=rounds)
             tc_t0 = time.monotonic()
             results = tool_node.invoke(
                 {"messages": [AIMessage(content="", tool_calls=[tc])]}
             )["messages"]
             tc_duration_ms = int((time.monotonic() - tc_t0) * 1000)
             for m in results:
+                content = str(m.content)
                 emit(
                     "tool_result",
                     category=category,
                     name=getattr(m, "name", None),
-                    result=str(m.content)[:TRACE_TRUNCATE],
+                    result=content[:TRACE_TRUNCATE],
+                    truncated=len(content) > TRACE_TRUNCATE,
                     duration_ms=tc_duration_ms,
+                    round=rounds,
                 )
             local.extend(results)
     emit(
@@ -262,12 +302,20 @@ def personality_node(state: AgentState):
         + [HumanMessage(content="Reply now, per your instructions.")]
     )
 
+    def _llm(key):
+        # reasoning_effort="low": this node only writes a short, in-character
+        # reply from data already gathered - it doesn't need to burn a large
+        # reasoning budget, and doing so on ambiguous/off-topic turns has been
+        # seen to consume the entire output budget on "thinking" and leave no
+        # text behind, i.e. an empty reply.
+        return ChatGoogleGenerativeAI(model=MODEL, google_api_key=key, reasoning_effort="low")
+
     def _stream(key):
         # Build the reply as a plain string rather than merging raw
         # AIMessageChunks, to avoid re-sending provider-specific chunk
         # artifacts back as conversation history.
         parts = []
-        for chunk in ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).stream(context):
+        for chunk in _llm(key).stream(context):
             text = _chunk_text(chunk)
             if text:
                 parts.append(text)
@@ -283,6 +331,17 @@ def personality_node(state: AgentState):
             raise
         emit("node_warning", node="personality", message=f"primary key failed, retrying with backup: {err}")
         full_text = _stream(BACKUP_KEY)
+
+    if not full_text.strip():
+        # Streaming occasionally yields no text block at all (e.g. the model
+        # spent its whole turn on non-text/thinking content) even though a
+        # plain, non-streamed call for the same context reliably returns one -
+        # retry once before ever showing the user a blank reply.
+        emit("node_warning", node="personality", message="stream produced no text, retrying with a plain call")
+        full_text = _chunk_text(invoke_with_fallback(_llm, context))
+
+    if not full_text.strip():
+        full_text = "Sorry, I didn't quite catch that - could you rephrase?"
 
     response = AIMessage(content=full_text)
     emit(

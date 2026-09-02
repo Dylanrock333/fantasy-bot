@@ -62,7 +62,7 @@ venv/bin/python3 fantasy_agent/chat.py
 
 Web UI (chat pane + live graph-trace pane):
 ```bash
-venv/bin/uvicorn webapp.server:app --reload --port 8787
+venv/bin/uvicorn webapp.server:app --reload --reload-dir webapp --reload-dir fantasy_agent --port 8787
 ```
 then open `http://localhost:8787`. To reach it from other devices without
 opening a public port, `tailscale serve --bg 8787` shares it tailnet-only

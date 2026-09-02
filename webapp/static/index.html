@@ -10,7 +10,7 @@
 <div class="layout">
   <main class="chat-pane">
     <header class="chat-header">
-      <span>Fantasy Agent</span>
+      <span>Fantasy Agent <span id="versionTag" class="version-tag"></span></span>
       <div class="chat-header-actions">
         <button id="toggleTrace" title="Show or hide the graph trace">Hide trace</button>
         <button id="newChat" title="Clear conversation">New chat</button>
@@ -25,8 +25,19 @@
   <aside class="trace-pane">
     <header class="trace-header">
       <span>Graph Trace</span>
-      <button id="clearTrace" title="Clear trace log">Clear</button>
+      <div class="chat-header-actions">
+        <button id="toggleLegend" title="Show or hide the color/label legend">Legend</button>
+        <button id="clearTrace" title="Clear trace log">Clear</button>
+      </div>
     </header>
+    <div id="traceLegend" class="trace-legend" hidden>
+      <div><i class="legend-swatch" style="background:var(--node)"></i>node start/end - a graph step beginning or finishing</div>
+      <div><i class="legend-swatch" style="background:var(--tool-call)"></i>tool call - a request to fetch data</div>
+      <div><i class="legend-swatch" style="background:var(--tool-result)"></i>tool result - the data that came back</div>
+      <div><i class="legend-swatch" style="background:var(--warning)"></i>warning - a recoverable hiccup (e.g. fallback retry)</div>
+      <div><i class="legend-swatch" style="background:var(--error)"></i>error - the turn failed</div>
+      <div class="legend-note">"round N" in a tool call/result label = which back-and-forth loop within that category it belongs to, not a color.</div>
+    </div>
     <div id="trace" class="trace"></div>
   </aside>
 </div>
