@@ -226,6 +226,79 @@ function fmtArgs(v) {
   }
 }
 
+function fmtArgsInline(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) {
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return Object.entries(v)
+    .map(([k, val]) => `${k}=${typeof val === "string" ? val : JSON.stringify(val)}`)
+    .join(", ");
+}
+
+// Parallel, token-lean record of the conversation - kept alongside the rich
+// DOM trace so "Copy" can produce plain text worth pasting back
+// into a chat, instead of re-scraping innerText off two differently-shaped
+// panes (which would carry timestamps, ms, emojis, etc. that don't help
+// debugging and just cost tokens).
+let transcriptTurns = [];
+let pendingCallByCategory = {};
+
+function startTranscriptTurn(message) {
+  transcriptTurns.push({ message, lines: [], botText: "" });
+  pendingCallByCategory = {};
+}
+
+function recordTranscriptEvent(evt) {
+  const turn = transcriptTurns[transcriptTurns.length - 1];
+  if (!turn) return;
+  switch (evt.type) {
+    case "node_end":
+      if (evt.node === "supervisor") {
+        if (evt.reasoning) turn.lines.push(`[supervisor] reasoning: ${evt.reasoning}`);
+        turn.lines.push(
+          `[supervisor] categories: ${evt.categories && evt.categories.length ? evt.categories.join(", ") : "(none)"}`
+        );
+      }
+      break;
+    case "tool_call":
+      pendingCallByCategory[evt.category] = evt.name;
+      turn.lines.push(`${evt.category}.${evt.name}(${fmtArgsInline(evt.args)}) ->`);
+      break;
+    case "tool_result": {
+      // Appended onto the just-pushed call line so each call+result is one
+      // line instead of two - the calls/results loop is strictly
+      // call-then-result per category, so the last line is always the match.
+      const last = turn.lines[turn.lines.length - 1];
+      if (last && last.endsWith(" ->")) {
+        turn.lines[turn.lines.length - 1] = `${last} ${evt.result}`;
+      } else {
+        turn.lines.push(`${evt.category}.${evt.name || ""}() -> ${evt.result}`);
+      }
+      break;
+    }
+    case "node_warning":
+      turn.lines.push(`! [${evt.node}] ${evt.message}`);
+      break;
+    case "error":
+      turn.lines.push(`! error: ${evt.message}`);
+      break;
+  }
+}
+
+function buildTranscriptText() {
+  if (!transcriptTurns.length) return "";
+  return transcriptTurns
+    .map((t, i) => {
+      const trace = t.lines.length ? t.lines.join("\n") : "(no tool calls)";
+      return `=== Turn ${i + 1} ===\nUSER: ${t.message}\n\n${trace}\n\nBOT: ${t.botText}`;
+    })
+    .join("\n\n");
+}
+
 // Short, fixed one-liners on what each node actually does - shown next to
 // its label so the trace reads as "step + purpose" without needing a
 // separate legend or a more visual layout.
@@ -236,6 +309,7 @@ const NODE_PURPOSE = {
 };
 
 function addTraceEvent(evt) {
+  recordTranscriptEvent(evt);
   traceEl.querySelector(".trace-empty")?.remove();
 
   const div = document.createElement("div");
@@ -299,6 +373,7 @@ function addTraceEvent(evt) {
 // One divider per user message, so the trace reads as separate turns
 // instead of one continuous stream of same-looking rows.
 function addTraceTurnDivider(message) {
+  startTranscriptTurn(message);
   traceEl.querySelector(".trace-empty")?.remove();
   const div = document.createElement("div");
   div.className = "trace-turn";
@@ -347,6 +422,8 @@ async function send(message) {
         } else if (evt.type === "done") {
           botDiv.innerHTML = renderMessage(evt.text);
           botDiv.classList.remove("pending");
+          const turn = transcriptTurns[transcriptTurns.length - 1];
+          if (turn) turn.botText = evt.text;
         } else if (evt.type === "error") {
           botDiv.textContent = `error: ${evt.message}`;
           botDiv.classList.remove("pending");
@@ -383,6 +460,25 @@ document.getElementById("newChat").addEventListener("click", async () => {
   });
   chatEl.innerHTML = "";
   traceEl.innerHTML = '<div class="trace-empty">No activity yet.</div>';
+  transcriptTurns = [];
+  pendingCallByCategory = {};
+});
+
+document.getElementById("copyTranscript").addEventListener("click", async () => {
+  const btn = document.getElementById("copyTranscript");
+  const text = buildTranscriptText();
+  if (!text) {
+    btn.textContent = "Nothing yet";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "Copied!";
+  } catch (err) {
+    btn.textContent = "Copy failed";
+  }
+  setTimeout(() => { btn.textContent = "Copy"; }, 1200);
 });
 
 document.getElementById("clearTrace").addEventListener("click", () => {

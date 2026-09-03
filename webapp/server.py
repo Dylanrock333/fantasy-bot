@@ -12,6 +12,7 @@ a local dev tool). /api/chat streams two kinds of events over SSE:
 """
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -64,6 +65,19 @@ async def version():
 
 _sessions: dict[str, list] = {}
 
+# Caps how much history is replayed into the graph each turn - each turn can
+# expand into several tool-call/tool-result messages, so unbounded history
+# grows the context fast. Trimming (rather than just capping message count)
+# keeps whole turns intact instead of cutting mid tool-call sequence.
+MAX_TURNS = int(os.environ.get("FANTASY_AGENT_MAX_TURNS", "5"))
+
+
+def _trim_to_last_turns(messages: list, max_turns: int) -> list:
+    human_indices = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+    if len(human_indices) <= max_turns:
+        return messages
+    return messages[human_indices[-max_turns]:]
+
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -72,8 +86,9 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    messages = _sessions.setdefault(req.session_id, [])
-    messages.append(HumanMessage(content=req.message))
+    history = _sessions.setdefault(req.session_id, [])
+    history.append(HumanMessage(content=req.message))
+    context = _trim_to_last_turns(history, MAX_TURNS)
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -81,11 +96,11 @@ async def chat(req: ChatRequest):
     async def run_graph():
         try:
             with trace.bind(loop, queue):
-                result = await asyncio.to_thread(graph.invoke, {"messages": messages})
-            _sessions[req.session_id] = result["messages"]
+                result = await asyncio.to_thread(graph.invoke, {"messages": context})
+            _sessions[req.session_id] = _trim_to_last_turns(result["messages"], MAX_TURNS)
             await queue.put({"type": "done", "text": result["messages"][-1].text})
         except Exception as err:
-            messages.pop()  # drop the failed user turn, mirrors chat.py
+            history.pop()  # drop the failed user turn, mirrors chat.py
             await queue.put({"type": "error", "message": str(err)})
         finally:
             await queue.put(None)  # sentinel: closes the stream

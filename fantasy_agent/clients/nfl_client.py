@@ -66,6 +66,19 @@ def resolve_team(query: str) -> dict | None:
 _roster_cache: dict[str, list[dict]] = {}
 
 
+def _roster_from_depth_chart(team_id: str) -> list[dict]:
+    """Fallback for teams whose /roster endpoint 404s on ESPN's side (seen
+    live for the Cardinals, team id 22) - the depth chart lists the same
+    athletes with the same public ids under a separate, working endpoint."""
+    depth = get_json(f"{SITE_API}/teams/{team_id}/depthcharts")
+    seen: dict[str, dict] = {}
+    for formation in depth.get("depthchart", []):
+        for info in formation.get("positions", {}).values():
+            for a in info.get("athletes", []):
+                seen[a["id"]] = {"id": a["id"], "fullName": a.get("displayName", "")}
+    return list(seen.values())
+
+
 def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
     """Look up a real-NFL athlete's public-API id by team + name (substring
     match, falling back to fuzzy matching for typos), e.g. pro_team='DAL',
@@ -79,10 +92,13 @@ def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
 
     team_id = team["id"]
     if team_id not in _roster_cache:
-        roster = get_json(f"{SITE_API}/teams/{team_id}/roster")
-        _roster_cache[team_id] = [
-            p for group in roster.get("athletes", []) for p in group["items"]
-        ]
+        try:
+            roster = get_json(f"{SITE_API}/teams/{team_id}/roster")
+            _roster_cache[team_id] = [
+                p for group in roster.get("athletes", []) for p in group["items"]
+            ]
+        except requests.exceptions.HTTPError:
+            _roster_cache[team_id] = _roster_from_depth_chart(team_id)
 
     q = player_name.strip().lower()
     for p in _roster_cache[team_id]:

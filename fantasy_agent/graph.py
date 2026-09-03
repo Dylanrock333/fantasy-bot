@@ -30,7 +30,10 @@ from fantasy_agent.trace import emit
 TRACE_TRUNCATE = 800
 
 MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.5-flash")
-MAX_TOOL_ROUNDS = 4
+# 6, not 4: a "rank every WR on this team" question needs one round per named
+# player plus a round or two for the roster/depth-chart lookup that names
+# them - 4 left no room once a round got spent on an unhelpful tool call.
+MAX_TOOL_ROUNDS = 6
 
 PRIMARY_KEY = os.environ.get("GOOGLE_API_KEY")
 BACKUP_KEY = os.environ.get("GOOGLE_API_KEY_BACKUP")
@@ -133,9 +136,11 @@ def _personality_system() -> SystemMessage:
         "assumption, or 'usually.' If the gathered data doesn't cover part "
         "of the question, say so explicitly (e.g. 'no coach data was "
         "pulled for this') rather than guessing.\n\n"
-        "Keep replies SHORT: 2-5 sentences by default, and never more than "
-        "a tight bulleted list for things like standings or rosters. No "
-        "filler, no restating the question, no disclaimers beyond flagging "
+        "Keep replies SHORT: 2-5 sentences of framing text by default. "
+        "Whenever the answer has two or more comparable rows of data - "
+        "standings, rosters, multi-player stat lines, matchup comparisons - "
+        "default to a single table (see TABLES below) instead of prose or "
+        "bullets. No filler, no restating the question, no disclaimers beyond flagging "
         "genuinely missing data. Label every bare number with a short unit "
         "so it's never ambiguous - e.g. '364.9 pts' not '(364.9)', '75 rec "
         "/ 1,077 yds / 3 TD' not '75/1,077/3', '6 playoff teams'. "
@@ -146,11 +151,14 @@ def _personality_system() -> SystemMessage:
         "conversation, and non-football questions all still get a short, "
         "in-character response using only the conversation itself. Never "
         "produce an empty or whitespace-only reply.\n\n"
-        "CHARTS: if the user explicitly asks to see something as a chart, "
-        "graph, or visual comparison, emit exactly one fenced code block "
-        "labeled `chart` (```chart ... ```) containing a single JSON "
-        "object and nothing else inside the fence. Two shapes are "
-        "supported:\n"
+        "TABLES: whenever your reply has two or more comparable rows of "
+        "data - not just when the user asks for a 'chart' or 'table' - "
+        "default to presenting it as a single table. Emit exactly one "
+        "fenced code block labeled `chart` (```chart ... ```) containing a "
+        "single JSON object and nothing else inside the fence; never "
+        "hand-write a markdown or bulleted table instead, and never split "
+        "one answer's data across more than one such block. Two shapes "
+        "are supported:\n"
         "- Comparing two or more things across several differently-scaled "
         "metrics (e.g. two teams' full stat lines): "
         '{"type": "comparison", "title": "...", "series": ["Name A", '
@@ -165,8 +173,9 @@ def _personality_system() -> SystemMessage:
         "Values must be raw numbers (no commas or unit text baked in) - "
         "put the unit in the `unit` field. You may add one short sentence "
         "of framing text before the code block, but never restate the "
-        "chart's numbers again in prose below it, and never emit a chart "
-        "block unless a chart/graph was actually requested."
+        "chart's numbers again in prose below it. Skip the table entirely "
+        "only when the reply is a single fact, a one-line answer, or "
+        "non-data chat (greetings, opinions, follow-up banter)."
     ))
 
 
@@ -233,6 +242,12 @@ def run_category_node(state: AgentState):
         "of a team name, and never treat a team name as a player or user "
         "name. Only trust players confirmed via fantasy_roster or "
         "matchup/box-score tool output.\n"
+        "When the question already names specific players, or asks you to "
+        "rank/compare every player in a specific group (e.g. a team's "
+        "WRs), call each named player's own stat tool directly (e.g. "
+        "get_nfl_player_summary once per player) rather than starting "
+        "with a league-wide leaderboard tool - those rarely include the "
+        "exact players you need and each call still costs a full round.\n"
         "Call whatever tools serve that plan, then stop - never write a "
         "summary or answer yourself."
     ))
