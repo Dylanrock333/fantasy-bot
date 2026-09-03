@@ -3,6 +3,7 @@ depth charts, season offensive/defensive statistics (points, yards, sacks,
 takeaways, etc.), and league conference/division structure (public
 espn_nfl_public/ API, not your fantasy rosters - see fantasy_roster_tools.py
 for that)."""
+import requests
 from langchain_core.tools import tool
 
 from ..clients.nfl_client import SITE_API, get_json, resolve_team
@@ -103,13 +104,40 @@ def get_team_coach(team_name: str) -> str:
     return f"{team['displayName']} head coach: {names}."
 
 
+def _roster_from_depth_chart(team: dict) -> str:
+    """Fallback for teams whose /roster endpoint 404s on ESPN's side (seen
+    live for the Cardinals, team id 22) - the depth chart is starters only,
+    grouped by chart slot rather than true roster position, so this covers
+    starters, not the full active roster."""
+    depth = get_json(f"{SITE_API}/teams/{team['id']}/depthcharts")
+    formations = depth.get("depthchart", [])
+    if not formations:
+        return f"No roster or depth chart available for the {team['displayName']}."
+    lines = []
+    for formation in formations:
+        names = ", ".join(
+            f"{slot.upper()}: {info['athletes'][0]['displayName']}"
+            for slot, info in formation["positions"].items() if info.get("athletes")
+        )
+        if names:
+            lines.append(names)
+    return (
+        f"{team['displayName']} roster (roster endpoint unavailable - "
+        "showing depth-chart starters only, not the full active roster):\n"
+        + "\n".join(lines)
+    )
+
+
 @tool
 def get_nfl_team_roster(team_name: str) -> str:
     """Get a real-NFL team's full active roster grouped by position, e.g. team_name='Cowboys' or 'DAL'."""
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
-    data = get_json(f"{SITE_API}/teams/{team['id']}/roster")
+    try:
+        data = get_json(f"{SITE_API}/teams/{team['id']}/roster")
+    except requests.exceptions.HTTPError:
+        return _roster_from_depth_chart(team)
     groups = data.get("athletes", [])
     if not groups:
         return f"No roster available for the {team['displayName']}."
