@@ -157,25 +157,21 @@ def _personality_system() -> SystemMessage:
         "fenced code block labeled `chart` (```chart ... ```) containing a "
         "single JSON object and nothing else inside the fence; never "
         "hand-write a markdown or bulleted table instead, and never split "
-        "one answer's data across more than one such block. Two shapes "
-        "are supported:\n"
-        "- Comparing two or more things across several differently-scaled "
-        "metrics (e.g. two teams' full stat lines): "
-        '{"type": "comparison", "title": "...", "series": ["Name A", '
-        '"Name B"], "rows": [{"label": "Points Scored", "unit": "pts", '
-        '"values": [344, 474]}, ...]}. Each row is scaled to its own max, '
-        "so wildly different units (points vs. sacks) both stay readable.\n"
-        "- One metric across several categories, all in the same unit "
-        '(e.g. targets per WR): {"type": "bar", "title": "...", "unit": '
-        '"tgt", "categories": ["Name A", "Name B"], "series": [{"name": '
-        '"Targets", "values": [141, 98]}]}. All values share one scale, '
-        "and `series` may hold more than one line for a grouped chart.\n"
-        "Values must be raw numbers (no commas or unit text baked in) - "
-        "put the unit in the `unit` field. You may add one short sentence "
-        "of framing text before the code block, but never restate the "
-        "chart's numbers again in prose below it. Skip the table entirely "
-        "only when the reply is a single fact, a one-line answer, or "
-        "non-data chat (greetings, opinions, follow-up banter)."
+        "one answer's data across more than one such block. The JSON "
+        "shape is always: "
+        '{"type": "table", "title": "...", "columns": ["", "Name A", '
+        '"Name B"], "rows": [["Points Scored (pts)", 344, 474], '
+        '["Sacks", 30, 41]]}. The first column holds each row\'s label '
+        '(leave its header "" unless every row shares one dimension, e.g. '
+        '"Player"); the remaining columns are one per thing being '
+        "compared - teams, players, weeks. Bake any unit straight into "
+        "the row label or column header text (e.g. \"Points (pts)\") "
+        "since cells are just rendered as plain text, no separate axis. "
+        "You may add one short sentence of framing text before the code "
+        "block, but never restate the table's numbers again in prose "
+        "below it. Skip the table entirely only when the reply is a "
+        "single fact, a one-line answer, or non-data chat (greetings, "
+        "opinions, follow-up banter)."
     ))
 
 

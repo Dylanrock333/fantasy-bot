@@ -103,96 +103,19 @@ function renderMarkdown(text) {
 }
 
 // Renders the ```chart fenced JSON blocks the personality prompt emits when
-// asked for a chart/graph, by handing a plain Chart.js config to QuickChart
-// (https://quickchart.io - free, no key, GET a PNG back) instead of drawing
-// bars ourselves. Same categorical hues as before; no plotting dependency
-// to install, and the same config shape will work for a Discord embed later.
-const CHART_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500"];
-
-function chartLegend(names) {
-  if (names.length < 2) return "";
-  const items = names
-    .map((name, i) => `<span class="chart-legend-item"><i class="chart-swatch s${i % 4}"></i>${escapeHtml(String(name))}</span>`)
-    .join("");
-  return `<div class="chart-legend">${items}</div>`;
-}
-
-function chartAxis(unitTitle) {
-  return {
-    ticks: { color: "#ececec" },
-    grid: { color: "rgba(255,255,255,0.08)" },
-    title: unitTitle ? { display: true, text: String(unitTitle), color: "#ececec" } : undefined,
-  };
-}
-
-function quickChartImg(config, { width = 480, height = 280, alt = "chart" } = {}) {
-  // version=4: QuickChart defaults to Chart.js v2, which ignores this
-  // config's v3/v4-style options (plugins.legend/title, scales.x/y) and
-  // falls back to its own default legend instead.
-  const url =
-    `https://quickchart.io/chart?version=4&backgroundColor=transparent&width=${width}&height=${height}` +
-    `&c=${encodeURIComponent(JSON.stringify(config))}`;
-  return `<img class="chart-img" src="${url}" alt="${escapeHtml(alt)}" loading="lazy">`;
-}
-
+// asked for a chart/graph, as a plain HTML table. Kept to one simple shape
+// deliberately - {type: "table", title, columns, rows} - the same JSON also
+// renders server-side as a PNG via fantasy_agent/chart_render.py for
+// contexts (Discord, a future image-to-image restyling pass) that need an
+// actual image instead of markup.
 function renderChart(data) {
-  if (data.type === "bar" && Array.isArray(data.categories)) {
-    const seriesList = Array.isArray(data.series) ? data.series : [];
-    const config = {
-      type: "bar",
-      data: {
-        labels: data.categories,
-        datasets: seriesList.map((s, i) => ({
-          label: s.name || `Series ${i + 1}`,
-          data: (s.values || []).map((v) => Number(v) || 0),
-          backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-        })),
-      },
-      options: {
-        plugins: {
-          legend: { display: seriesList.length > 1, labels: { color: "#ececec" } },
-          title: data.title ? { display: true, text: String(data.title), color: "#ececec" } : undefined,
-          datalabels: { anchor: "end", align: "end", color: "#ececec" },
-        },
-        layout: { padding: { top: 28 } },
-        scales: { x: chartAxis(null), y: chartAxis(data.unit) },
-      },
-    };
-    return `<div class="chart">${quickChartImg(config, { width: 520, alt: data.title })}</div>`;
-  }
-
-  // Different metrics rarely share a scale (points vs. sacks), so a
-  // "comparison" is small multiples - one mini chart per row, all sharing
-  // one color-to-name legend instead of repeating it on every chart.
-  if (data.type === "comparison" && Array.isArray(data.rows)) {
-    const series = (Array.isArray(data.series) ? data.series : []).map(String);
-    const cells = data.rows
-      .map((row) => {
-        const values = (Array.isArray(row.values) ? row.values : []).map((v) => Number(v) || 0);
-        const config = {
-          type: "bar",
-          data: {
-            labels: series,
-            datasets: [{
-              data: values,
-              backgroundColor: values.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
-            }],
-          },
-          options: {
-            plugins: {
-              legend: { display: false },
-              title: { display: true, text: String(row.label ?? ""), color: "#ececec" },
-              datalabels: { anchor: "end", align: "end", color: "#ececec" },
-            },
-            layout: { padding: { top: 28 } },
-            scales: { x: chartAxis(null), y: chartAxis(row.unit) },
-          },
-        };
-        return `<div class="chart-cell">${quickChartImg(config, { width: 260, height: 200, alt: row.label })}</div>`;
-      })
+  if (data.type === "table" && Array.isArray(data.columns) && Array.isArray(data.rows)) {
+    const head = data.columns.map((c) => `<th>${escapeHtml(String(c))}</th>`).join("");
+    const body = data.rows
+      .map((row) => `<tr>${row.map((v) => `<td>${escapeHtml(String(v))}</td>`).join("")}</tr>`)
       .join("");
     const title = data.title ? `<div class="chart-title">${escapeHtml(String(data.title))}</div>` : "";
-    return `<div class="chart">${title}${chartLegend(series)}<div class="chart-grid">${cells}</div></div>`;
+    return `<div class="chart">${title}<table class="chart-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   return `<pre class="chart-raw">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;

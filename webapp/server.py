@@ -25,13 +25,14 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from fantasy_agent import trace
+from fantasy_agent.chart_render import render_chart_png
 from fantasy_agent.graph import build_graph
 
 app = FastAPI()
@@ -121,6 +122,19 @@ async def chat(req: ChatRequest):
 async def reset(req: dict):
     _sessions.pop(req.get("session_id"), None)
     return {"ok": True}
+
+
+@app.post("/api/chart")
+async def chart_image(data: dict):
+    # Takes one parsed ```chart JSON object (the "bar" or "comparison" shape
+    # from _personality_system in graph.py) and returns a rendered PNG -
+    # the pixels a later image-to-image restyling pass would need, rather
+    # than the chart spec the webapp/Discord bot currently consume directly.
+    try:
+        png = render_chart_png(data)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+    return Response(content=png, media_type="image/png")
 
 
 @app.middleware("http")
