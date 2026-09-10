@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "fantasy_bot",
+  "project_id": "6b143619-af32-4ca4-a66b-d7905be784b5"
+}
