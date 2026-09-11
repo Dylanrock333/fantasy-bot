@@ -27,7 +27,7 @@ flowchart TD
     RC1 --> P
     RC2 --> P
     RCn --> P
-    P["personality\n(one synthesis pass, streamed to user)"] --> R[Reply]
+    P["personality\n(one synthesis pass)"] --> R[Reply]
 ```
 
 ## The three node types
@@ -80,7 +80,7 @@ All categories' results land in the shared `messages` list in graph state
 ### 3. `personality` (runs once, the only node the user sees)
 
 Takes whatever data every category gathered (already sitting in
-`messages`) and streams back one reply, word by word. Two rules are baked
+`messages`) and writes one reply in a single model call. Two rules are baked
 into its prompt and matter a lot:
 
 - **Stay grounded**: every fact, name, or number in the reply has to come
@@ -117,12 +117,9 @@ first, and if it fails in a way a second key could plausibly fix (HTTP
 429, or an error mentioning "quota"/"credit balance"), retry once against
 `GOOGLE_API_KEY_BACKUP` if one's configured. Anything else just fails.
 
-`personality`'s streaming path has one more fallback on top of that: if
-streaming comes back with no text at all (which happens occasionally even
-though a plain, non-streamed call for the same input works fine), it
-retries once as a plain call before showing the user anything. If that
-*still* comes back empty, it falls back to a fixed "Sorry, I didn't quite
-catch that" instead of an empty message.
+`personality` has one more fallback on top of that: if the model call comes
+back with no text at all, it falls back to a fixed "Sorry, I didn't quite
+catch that" instead of showing the user an empty message.
 
 ## State shape
 
@@ -135,13 +132,11 @@ naming which category a given parallel branch belongs to.
 
 Every node calls `fantasy_agent/trace.py`'s `emit()` around its work
 (`node_start`/`node_end` pairs, plus `tool_call`/`tool_result` inside
-`run_category`, and `token` for each streamed chunk from `personality`)
-rather than printing directly. `emit()` always prints (`[trace] <event>
-<data>`); with nothing else listening, that's all it does. The API server
-also opens a per-request queue for the duration of one `graph.invoke()`
-call and forwards every event as an SSE event too — that's what lets a
-client watch the graph work step by step instead of just waiting for the
-final reply to show up.
+`run_category`) rather than printing directly. `emit()` just prints
+(`[trace] <event> <data>`) — it's a local log line, nothing consumes these
+over the network. `scripts/chat_audit.py` is the one place that reads them
+back, by temporarily monkeypatching `trace.emit` to also capture events
+into its report.
 
 ## Adding a new data source
 

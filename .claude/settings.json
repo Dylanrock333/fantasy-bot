@@ -1,8 +1,9 @@
 {
   "enabledPlugins": {
     "beads@beads-marketplace": true,
+    "claude-mem@thedotmack": false,
     "context7@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true,
-    "claude-mem@thedotmack": false
-  }
+    "superpowers@claude-plugins-official": true
+  },
+  "hooks": {}
 }

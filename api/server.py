@@ -3,14 +3,10 @@
 Run: uvicorn api.server:app --reload --reload-dir api --reload-dir fantasy_agent --port 8787
 
 One in-memory conversation per caller-supplied session_id (no auth, no DB).
-/api/chat streams two kinds of events over SSE:
-  - trace events from fantasy_agent.trace (node_start/node_end/tool_call/
-    tool_result/node_warning) - one per graph step, as it happens.
-  - token events - the personality node's reply, streamed word-by-word.
-  - a final `done` event with the full reply text, or `error` on failure.
+/api/chat runs the graph and returns the reply as plain JSON.
+/api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.
 """
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -22,12 +18,11 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Response
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from fantasy_agent import trace
+from fantasy_agent.chart_render import render_chart_png
 from fantasy_agent.graph import build_graph
 
 app = FastAPI()
@@ -46,31 +41,22 @@ async def chat(req: ChatRequest):
     messages = _sessions.setdefault(req.session_id, [])
     messages.append(HumanMessage(content=req.message))
 
-    queue: asyncio.Queue = asyncio.Queue()
-    loop = asyncio.get_running_loop()
+    try:
+        result = await asyncio.to_thread(graph.invoke, {"messages": messages})
+    except Exception as err:
+        messages.pop()  # drop the failed user turn so it isn't replayed next call
+        raise HTTPException(status_code=500, detail=str(err))
 
-    async def run_graph():
-        try:
-            with trace.bind(loop, queue):
-                result = await asyncio.to_thread(graph.invoke, {"messages": messages})
-            _sessions[req.session_id] = result["messages"]
-            await queue.put({"type": "done", "text": result["messages"][-1].text})
-        except Exception as err:
-            messages.pop()  # drop the failed user turn so it isn't replayed next call
-            await queue.put({"type": "error", "message": str(err)})
-        finally:
-            await queue.put(None)  # sentinel: closes the stream
+    _sessions[req.session_id] = result["messages"]
+    return {"reply": result["messages"][-1].text}
 
-    asyncio.create_task(run_graph())
 
-    async def event_stream():
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield f"data: {json.dumps(item)}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+@app.post("/api/chart")
+async def chart(req: dict):
+    png_bytes = await asyncio.to_thread(render_chart_png, req)
+    if png_bytes is None:
+        raise HTTPException(status_code=422, detail="unrecognized chart shape")
+    return Response(content=png_bytes, media_type="image/png")
 
 
 @app.post("/api/reset")

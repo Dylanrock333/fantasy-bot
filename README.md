@@ -8,8 +8,8 @@ scores, ...) is fetched by its own small, isolated tool-calling loop instead
 of one agent with every tool in scope.
 
 The [Discord bot](https://github.com/Dylanrock333/the-fantasy-zone-discord)
-is the only client: it calls this API's `/api/chat` endpoint and streams
-back the reply.
+is the only client: it calls this API's `/api/chat` endpoint and gets the
+reply back as plain JSON (no streaming - there's no web app to stream to).
 
 ## Layout
 
@@ -17,13 +17,16 @@ back the reply.
 fantasy_espn/       Private ESPN fantasy-league client (espn_api-based) - needs league auth
 fantasy_agent/       The LangGraph agent itself
   graph.py             Builds the graph: supervisor -> Send(run_category) x N -> personality
-  trace.py             emit() event hook nodes call instead of print() - prints, and also
-                        forwards to a sink when one's bound (see api/server.py)
+  trace.py             emit() event hook nodes call instead of print(), for a consistent,
+                        greppable log shape
+  chart_render.py       Renders the bot's ```chart``` JSON (bar/comparison) to a PNG -
+                         shared by api/server.py's /api/chart and scripts/chat_audit.py
   tools/                One module per category (fantasy_*, nfl_*), each exporting TOOLS;
                          tools/__init__.py wires them into CATEGORY_REGISTRY
   clients/              Shared singletons (fantasy league client, public NFL data client)
 api/                 FastAPI server - the whole surface Discord talks to
-  server.py            /api/chat (SSE: trace events + streamed reply tokens), /api/reset
+  server.py            /api/chat, /api/chart (chart JSON -> PNG), /api/reset - plain
+                        JSON in, JSON/PNG out, no streaming
 docs/                Consolidated reference docs (see below)
 ```
 
@@ -74,8 +77,7 @@ START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality
   data or hits the cap.
 - **personality** is the only node the user sees. It's under a hard
   grounding rule - every fact in its reply must come from tool results
-  gathered this turn, nothing from model memory - and streams its reply
-  token by token rather than returning it all at once.
+  gathered this turn, nothing from model memory.
 
 It's a deliberately one-shot pipeline, not a network where agents call each
 other: supervisor classifies once, categories run once, personality
@@ -87,20 +89,16 @@ missed something. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
 ## Notes for whoever (human or agent) picks this up next
 
 - **Tracing**: every node emits structured events via `fantasy_agent/trace.py`'s
-  `emit()` instead of `print()` directly. `emit()` always prints; `api/server.py`
-  additionally binds a per-request `asyncio.Queue` for the duration of one
-  `graph.invoke()` call and forwards each event to that request's caller over
-  SSE. If you add a new node or a new kind of step worth surfacing, emit a
-  `node_start`/`node_end` pair (with `duration_ms`) around it - no consumer
-  changes needed, unrecognized event types just pass through.
-- **Streaming and message history don't mix carelessly**: `personality_node`
-  used to merge raw `AIMessageChunk`s from `.stream()` with `+`, which could
-  leave a stray *empty* text content block in the stored message. That
-  message then gets resent as conversation history on the next turn, and
-  the model provider rejects the whole request 400
-  (`"text content blocks must be non-empty"`). Fixed by collecting streamed
-  text into a plain string and wrapping it in a clean `AIMessage(content=...)`
-  before it goes into graph state - don't revert to storing raw chunks.
+  `emit()` instead of `print()` directly - it's a local log line only
+  (`[trace] event_type {...}`), nothing forwards these anywhere. If you add a
+  new node or a new kind of step worth surfacing, emit a `node_start`/`node_end`
+  pair (with `duration_ms`) around it. `scripts/chat_audit.py` monkeypatches
+  `trace.emit` to capture these events into its report - keep `emit`'s
+  signature (`event_type: str, **data`) stable for that.
+- **No streaming**: `api/server.py` and `personality_node` are both plain
+  request/response - there was an SSE-based streaming path here for a now-removed
+  web app, but Discord only ever consumed the final text anyway, so it's gone.
+  `personality_node` calls the LLM with a single `.invoke()`.
 - **Session state is in-memory only**, in `api/server.py`'s `_sessions` dict
   (keyed by the caller-supplied `session_id`). Nothing persists across a
   process restart - there's no database yet.

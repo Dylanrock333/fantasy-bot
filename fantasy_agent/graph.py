@@ -310,35 +310,9 @@ def personality_node(state: AgentState):
         # text behind, i.e. an empty reply.
         return ChatGoogleGenerativeAI(model=MODEL, google_api_key=key, reasoning_effort="low")
 
-    def _stream(key):
-        # Build the reply as a plain string rather than merging raw
-        # AIMessageChunks, to avoid re-sending provider-specific chunk
-        # artifacts back as conversation history.
-        parts = []
-        for chunk in _llm(key).stream(context):
-            text = _chunk_text(chunk)
-            if text:
-                parts.append(text)
-                emit("token", text=text)
-        return "".join(parts)
-
     emit("node_start", node="personality")
     t0 = time.monotonic()
-    try:
-        full_text = _stream(PRIMARY_KEY)
-    except Exception as err:
-        if not BACKUP_KEY or not _is_exhausted(err):
-            raise
-        emit("node_warning", node="personality", message=f"primary key failed, retrying with backup: {err}")
-        full_text = _stream(BACKUP_KEY)
-
-    if not full_text.strip():
-        # Streaming occasionally yields no text block at all (e.g. the model
-        # spent its whole turn on non-text/thinking content) even though a
-        # plain, non-streamed call for the same context reliably returns one -
-        # retry once before ever showing the user a blank reply.
-        emit("node_warning", node="personality", message="stream produced no text, retrying with a plain call")
-        full_text = _chunk_text(invoke_with_fallback(_llm, context))
+    full_text = _chunk_text(invoke_with_fallback(_llm, context))
 
     if not full_text.strip():
         full_text = "Sorry, I didn't quite catch that - could you rephrase?"
