@@ -1,8 +1,7 @@
 """Real-NFL data: team identity, rosters, schedules, records, injuries,
 depth charts, season offensive/defensive statistics (points, yards, sacks,
-takeaways, etc.), and league conference/division structure (public
-espn_nfl_public/ API, not your fantasy rosters - see fantasy_roster_tools.py
-for that)."""
+takeaways, etc.), and league conference/division structure (ESPN's public
+API, not your fantasy rosters - see fantasy_roster_tools.py for that)."""
 from langchain_core.tools import tool
 
 from ..clients.nfl_client import SITE_API, get_json, resolve_team

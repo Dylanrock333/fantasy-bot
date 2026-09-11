@@ -4,13 +4,13 @@ registering it below - no graph changes needed.
 
 Category names are prefixed to keep the two data sources unambiguous to the
 supervisor LLM: "fantasy_*" = your private league (fantasy_espn/), "nfl_*" =
-real-world NFL data (espn_nfl_public/).
+real-world NFL data (ESPN's public API, see docs/NFL_PUBLIC_API.md).
 """
 import sys
 from pathlib import Path
 
 # Let this package be imported regardless of the process's cwd - fantasy_espn
-# and espn_nfl_public are siblings of fantasy_agent/, not installed packages.
+# is a sibling of fantasy_agent/, not an installed package.
 ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))

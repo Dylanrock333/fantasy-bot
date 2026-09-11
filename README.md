@@ -1,40 +1,38 @@
 # Fantasy Bot
 
-A chat agent that answers fantasy-football questions by pulling live data
-from your private ESPN fantasy league and public NFL sources, then replying
-in a short, opinionated voice. Built as a LangGraph supervisor + parallel
+An API that answers fantasy-football questions by pulling live data from
+your private ESPN fantasy league and public NFL sources, then replying in a
+short, opinionated voice. Built as a LangGraph supervisor + parallel
 category-worker graph so each data domain (roster, standings, injuries,
 scores, ...) is fetched by its own small, isolated tool-calling loop instead
 of one agent with every tool in scope.
 
-Two ways to talk to it: a CLI (`fantasy_agent/chat.py`) and a local web chat
-UI (`webapp/`) with a live side panel that shows the graph working -
-supervisor's category picks, each tool call and its result, and the final
-reply streaming in token by token.
+The [Discord bot](https://github.com/Dylanrock333/the-fantasy-zone-discord)
+is the only client: it calls this API's `/api/chat` endpoint and streams
+back the reply.
 
 ## Layout
 
 ```
-espn_nfl_public/   Public NFL data client + scripts (scores, rosters, news, ...) - no auth needed
 fantasy_espn/       Private ESPN fantasy-league client (espn_api-based) - needs league auth
 fantasy_agent/       The LangGraph agent itself
   graph.py             Builds the graph: supervisor -> Send(run_category) x N -> personality
-  trace.py             emit() event hook nodes call instead of print() - no-ops with no sink bound
+  trace.py             emit() event hook nodes call instead of print() - prints, and also
+                        forwards to a sink when one's bound (see api/server.py)
   tools/                One module per category (fantasy_*, nfl_*), each exporting TOOLS;
                          tools/__init__.py wires them into CATEGORY_REGISTRY
-  clients/              Shared singletons (league client, per-conversation session history)
-  chat.py               CLI entry point
-  README.md             Detail on the graph's three node types and how to tune them
-webapp/               FastAPI + vanilla JS/HTML/CSS chat UI, no build step
-  server.py              /api/chat (SSE: trace events + streamed reply tokens), /api/reset
-  static/                index.html / app.js / style.css - chat pane + collapsible trace pane
-scripts/               One-off utilities (e.g. find_rookies.py)
+  clients/              Shared singletons (fantasy league client, public NFL data client)
+api/                 FastAPI server - the whole surface Discord talks to
+  server.py            /api/chat (SSE: trace events + streamed reply tokens), /api/reset
+docs/                Consolidated reference docs (see below)
 ```
 
 Add a new data source by adding a `@tool` function to the right module in
 `fantasy_agent/tools/` (or a new module + one line in `tools/__init__.py` for
 a new category) - the supervisor and graph pick it up automatically, no
-graph changes needed.
+graph changes needed. See `docs/NFL_PUBLIC_API.md` / `docs/FANTASY_ESPN_API.md`
+for what's available to call, and `docs/LANGGRAPH_WORKFLOW.md` for how the
+graph itself works.
 
 ## Setup
 
@@ -55,19 +53,13 @@ private league - update those two constants there if either changes.
 
 ## Running it
 
-CLI:
 ```bash
-venv/bin/python3 fantasy_agent/chat.py
+venv/bin/uvicorn api.server:app --reload --reload-dir api --reload-dir fantasy_agent --port 8787
 ```
-
-Web UI (chat pane + live graph-trace pane):
-```bash
-venv/bin/uvicorn webapp.server:app --reload --reload-dir webapp --reload-dir fantasy_agent --port 8787
-```
-then open `http://localhost:8787`. To reach it from other devices without
-opening a public port, `tailscale serve --bg 8787` shares it tailnet-only
-(never use `tailscale funnel` here - the app has no auth, and funnel makes
-it internet-public).
+Point the Discord bot's `FANTASY_AGENT_URL` at `http://localhost:8787` (its
+default). To reach it from another machine without opening a public port,
+`tailscale serve --bg 8787` shares it tailnet-only (never use `tailscale
+funnel` here - the app has no auth, and funnel makes it internet-public).
 
 ## Architecture
 
@@ -90,34 +82,30 @@ other: supervisor classifies once, categories run once, personality
 synthesizes once. That bounds it structurally - fixed fan-out, capped tool
 rounds, single synthesis step - so it can't infinite-loop, at the cost of
 not being able to request more data mid-reply if the initial classification
-missed something. See `fantasy_agent/README.md` for the node-level detail.
+missed something. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
 
 ## Notes for whoever (human or agent) picks this up next
 
 - **Tracing**: every node emits structured events via `fantasy_agent/trace.py`'s
-  `emit()` instead of `print()` directly. With no sink bound it just prints
-  (so the CLI is unaffected); `webapp/server.py` binds a per-request
-  `asyncio.Queue` for the duration of one `graph.invoke()` call and forwards
-  each event to that browser tab over SSE. If you add a new node or a new
-  kind of step worth surfacing, emit a `node_start`/`node_end` pair (with
-  `duration_ms`) around it and the trace panel picks it up with no frontend
-  changes - `webapp/static/app.js`'s `addTraceEvent()` already has a
-  fallback rendering for unrecognized event types.
+  `emit()` instead of `print()` directly. `emit()` always prints; `api/server.py`
+  additionally binds a per-request `asyncio.Queue` for the duration of one
+  `graph.invoke()` call and forwards each event to that request's caller over
+  SSE. If you add a new node or a new kind of step worth surfacing, emit a
+  `node_start`/`node_end` pair (with `duration_ms`) around it - no consumer
+  changes needed, unrecognized event types just pass through.
 - **Streaming and message history don't mix carelessly**: `personality_node`
   used to merge raw `AIMessageChunk`s from `.stream()` with `+`, which could
   leave a stray *empty* text content block in the stored message. That
   message then gets resent as conversation history on the next turn, and
-  Anthropic's API rejects the whole request 400
+  the model provider rejects the whole request 400
   (`"text content blocks must be non-empty"`). Fixed by collecting streamed
   text into a plain string and wrapping it in a clean `AIMessage(content=...)`
   before it goes into graph state - don't revert to storing raw chunks.
-- **Session state is in-memory only**, both in `fantasy_agent/clients/session.py`
-  (used by anything with multiple conversations, e.g. a future Discord bot)
-  and in `webapp/server.py`'s `_sessions` dict (keyed by a browser-generated
-  `session_id` in `localStorage`). Nothing persists across a process
-  restart - there's no database yet.
+- **Session state is in-memory only**, in `api/server.py`'s `_sessions` dict
+  (keyed by the caller-supplied `session_id`). Nothing persists across a
+  process restart - there's no database yet.
 - **Secrets**: `.env` and `venv/` are gitignored - keep it that way, never
-  commit `ESPN_S2`/`SWID`/Anthropic keys.
+  commit `ESPN_S2`/`SWID`/API keys.
 - **This repo**: private GitHub repo at `github.com/Dylanrock333/fantasy-bot`,
   `main` branch. `gh` CLI is installed and authenticated as `Dylanrock333`
   on this machine if you need it for PRs/issues.

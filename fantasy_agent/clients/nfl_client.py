@@ -1,9 +1,6 @@
 """Shared HTTP helper for ESPN's public (unauthenticated) NFL data API.
 
-Vendored from espn_nfl_public/nfl_client.py so fantasy_agent/ has no
-cross-package import and can be deployed standalone (e.g. as a Discord bot)
-without the espn_nfl_public/ reference scripts. Mirror changes there if the
-upstream client changes.
+See docs/NFL_PUBLIC_API.md for the full endpoint reference this wraps.
 
 Source: https://github.com/pseudo-r/Public-ESPN-API/blob/main/docs/sports/football.md
 No API key, espn_s2, or SWID required — contrast with fantasy_espn/espn_client.py,

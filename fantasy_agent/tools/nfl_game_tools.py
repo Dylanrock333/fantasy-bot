@@ -1,6 +1,6 @@
 """Real-NFL data scoped to one specific game: result, key plays, odds,
-broadcast info, officiating crew, and stat leaders (public espn_nfl_public/
-API), not fantasy matchups - see fantasy_matchup_tools.py for that.
+broadcast info, officiating crew, and stat leaders (ESPN's public API),
+not fantasy matchups - see fantasy_matchup_tools.py for that.
 Resolves team+week into a game id, then pulls CDN/Core API game data."""
 from langchain_core.tools import tool
 

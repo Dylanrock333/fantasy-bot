@@ -1,5 +1,5 @@
-"""Real-NFL data: league news headlines, transactions, and the draft (public
-espn_nfl_public/ API)."""
+"""Real-NFL data: league news headlines, transactions, and the draft
+(ESPN's public API)."""
 from langchain_core.tools import tool
 
 from ..clients.nfl_client import SITE_API, get_json

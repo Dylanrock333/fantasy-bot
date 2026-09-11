@@ -1,10 +1,10 @@
 """Structured event emission for graph.py's nodes.
 
 Every node/tool-call in graph.py calls emit(event_type, **data) instead of
-print(). With no sink bound, emit() just prints (identical to the old CLI
-behavior). webapp/server.py binds a sink for the duration of one graph.invoke
-call so it can forward every event to that request's browser tab as it
-happens, without graph.py knowing anything about HTTP/SSE.
+print(). emit() always prints; api/server.py additionally binds a sink for
+the duration of one graph.invoke call so it can forward every event to that
+request's caller as it happens over SSE, without graph.py knowing anything
+about HTTP/SSE.
 """
 import contextlib
 import contextvars

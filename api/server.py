@@ -1,10 +1,9 @@
-"""Chat UI + live graph-trace server for fantasy_agent.
+"""API server for fantasy_agent - the Discord bot is its only client.
 
-Run: uvicorn webapp.server:app --reload --reload-dir webapp --reload-dir fantasy_agent --port 8787
-Then open http://localhost:8787
+Run: uvicorn api.server:app --reload --reload-dir api --reload-dir fantasy_agent --port 8787
 
-One in-memory conversation per browser session_id (no auth, no DB - this is
-a local dev tool). /api/chat streams two kinds of events over SSE:
+One in-memory conversation per caller-supplied session_id (no auth, no DB).
+/api/chat streams two kinds of events over SSE:
   - trace events from fantasy_agent.trace (node_start/node_end/tool_call/
     tool_result/node_warning) - one per graph step, as it happens.
   - token events - the personality node's reply, streamed word-by-word.
@@ -12,7 +11,6 @@ a local dev tool). /api/chat streams two kinds of events over SSE:
 """
 import asyncio
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -26,7 +24,6 @@ load_dotenv(ROOT / ".env")
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
@@ -35,32 +32,6 @@ from fantasy_agent.graph import build_graph
 
 app = FastAPI()
 graph = build_graph()
-
-
-def _server_version() -> str:
-    # Derived from git, not hand-maintained, so it can never drift from what
-    # code is actually running - the one thing a manual version string can't
-    # promise. "+dirty" flags uncommitted edits (e.g. mid-development reload).
-    try:
-        sha = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        dirty = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        return f"{sha}+dirty" if dirty else sha
-    except Exception:
-        return "unknown"
-
-
-VERSION = _server_version()
-
-
-@app.get("/api/version")
-async def version():
-    return {"version": VERSION}
 
 _sessions: dict[str, list] = {}
 
@@ -85,7 +56,7 @@ async def chat(req: ChatRequest):
             _sessions[req.session_id] = result["messages"]
             await queue.put({"type": "done", "text": result["messages"][-1].text})
         except Exception as err:
-            messages.pop()  # drop the failed user turn, mirrors chat.py
+            messages.pop()  # drop the failed user turn so it isn't replayed next call
             await queue.put({"type": "error", "message": str(err)})
         finally:
             await queue.put(None)  # sentinel: closes the stream
@@ -106,18 +77,3 @@ async def chat(req: ChatRequest):
 async def reset(req: dict):
     _sessions.pop(req.get("session_id"), None)
     return {"ok": True}
-
-
-@app.middleware("http")
-async def no_cache_static(request, call_next):
-    # Local dev tool: static files change frequently and a stale cached
-    # app.js/style.css left over from before an edit is easy to mistake for
-    # a real bug. no-store (not just no-cache) so browsers never reuse a
-    # cached copy at all, even without revalidating first - a plain reload
-    # was still serving stale JS straight from disk cache under no-cache.
-    response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store"
-    return response
-
-
-app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

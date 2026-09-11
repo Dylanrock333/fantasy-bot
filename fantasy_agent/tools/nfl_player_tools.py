@@ -1,6 +1,6 @@
 """Real-NFL data: individual athlete stats, career/game-log/split detail,
-league-wide statistical leaders, and QBR rankings (public espn_nfl_public/
-API, not fantasy players/points - see fantasy_player_tools.py for that).
+league-wide statistical leaders, and QBR rankings (ESPN's public API,
+not fantasy players/points - see fantasy_player_tools.py for that).
 Cross-refs a fantasy roster player against real-world performance, e.g. for
 "who should I start" or "compare my roster to theirs" questions."""
 from datetime import datetime

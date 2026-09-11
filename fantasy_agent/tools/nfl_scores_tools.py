@@ -1,4 +1,4 @@
-"""Real-NFL data: scores, schedule, standings (public espn_nfl_public/ API,
+"""Real-NFL data: scores, schedule, standings (ESPN's public API,
 not your fantasy league - see fantasy_matchup_tools.py for that)."""
 from langchain_core.tools import tool
 
