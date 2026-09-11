@@ -41,6 +41,7 @@ graph itself works.
 
 ```bash
 python3 -m venv venv && venv/bin/pip install -r requirements.txt
+git config core.hooksPath .githooks   # strips AI co-author/session-link trailers - this repo is public
 ```
 
 `.env` (gitignored) needs:
