@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from fantasy_agent.chart_render import render_chart_png
 from fantasy_agent.graph import build_graph
+from fantasy_espn.espn_client import current_league_id
 
 app = FastAPI()
 graph = build_graph()
@@ -34,14 +35,18 @@ _sessions: dict[str, list] = {}
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    league_id: int
 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     messages = _sessions.setdefault(req.session_id, [])
     messages.append(HumanMessage(content=req.message))
+    current_league_id.set(req.league_id)
 
     try:
+        # asyncio.to_thread propagates the current contextvars context
+        # (including current_league_id) into the executor thread.
         result = await asyncio.to_thread(graph.invoke, {"messages": messages})
     except Exception as err:
         messages.pop()  # drop the failed user turn so it isn't replayed next call
