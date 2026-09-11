@@ -3,8 +3,6 @@ secrets/
 __pycache__/
 *.pyc
 venv/
-.claude/
-.codex/
 .beads/
-.agents/
 skills-lock.json
+scripts/audit_output/
