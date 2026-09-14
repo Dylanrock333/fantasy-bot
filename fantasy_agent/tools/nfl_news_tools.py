@@ -2,15 +2,37 @@
 (ESPN's public API)."""
 from langchain_core.tools import tool
 
-from ..clients.nfl_client import SITE_API, get_json
+from ..clients.nfl_client import ATHLETE_API, SITE_API, get_json, resolve_athlete
+
+
+def _best_link(articles: list[dict]) -> str | None:
+    """Pick a link Discord can actually embed: ESPN's /video/clip/ pages
+    carry no Open Graph tags (no title/image), so prefer the first /story/
+    article link and only fall back to whatever's first otherwise."""
+    links = [a.get("links", {}).get("web", {}).get("href") for a in articles]
+    links = [href for href in links if href]
+    for href in links:
+        if "/story/" in href:
+            return href
+    return links[0] if links else None
 
 
 @tool
 def get_nfl_news(limit: int = 5) -> str:
     """Get the latest real-NFL headlines."""
     news = get_json(f"{SITE_API}/news")
-    headlines = [a["headline"] for a in news.get("articles", [])[:limit]]
-    return "\n".join(headlines) or "No news found."
+    articles = news.get("articles", [])[:limit]
+    if not articles:
+        return "No news found."
+    lines = [
+        f"{a['headline']}: {a.get('description', '')}".strip(": ")
+        for a in articles
+    ]
+    top_link = _best_link(articles)
+    text = "\n".join(lines)
+    if top_link:
+        text += f"\n\n{top_link}"
+    return text
 
 
 @tool
@@ -47,4 +69,32 @@ def get_nfl_draft(limit: int = 32) -> str:
     return f"{data.get('displayName', 'NFL Draft')}:\n" + "\n".join(lines)
 
 
-TOOLS = [get_nfl_news, get_nfl_transactions, get_nfl_draft]
+@tool
+def get_player_news(player_name: str, pro_team: str, limit: int = 3) -> str:
+    """Get the latest real-NFL news headlines specifically about one player
+    (injuries, roles, outlook), not general league news. pro_team is that
+    player's real NFL team abbreviation or name (e.g. 'DAL' or 'Cowboys') -
+    get it from the player's proTeam field in a fantasy roster tool result
+    first; this tool cannot search by name alone. Use get_nfl_news instead
+    for general league-wide headlines."""
+    athlete = resolve_athlete(pro_team, player_name)
+    if athlete is None:
+        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
+
+    overview = get_json(f"{ATHLETE_API}/athletes/{athlete['id']}/overview")
+    articles = overview.get("news", [])[:limit]
+    if not articles:
+        return f"No recent news found for {athlete['fullName']}."
+
+    lines = [
+        f"{a['headline']}: {a.get('description', '')}".strip(": ")
+        for a in articles
+    ]
+    top_link = _best_link(articles)
+    text = f"News for {athlete['fullName']}:\n" + "\n".join(lines)
+    if top_link:
+        text += f"\n\n{top_link}"
+    return text
+
+
+TOOLS = [get_nfl_news, get_player_news, get_nfl_transactions, get_nfl_draft]

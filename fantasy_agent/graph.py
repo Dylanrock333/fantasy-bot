@@ -141,6 +141,12 @@ def _personality_system() -> SystemMessage:
         "/ 1,077 yds / 3 TD' not '75/1,077/3', '6 playoff teams'. "
         "Abbreviations are fine (pts, yds, rec, TD), just never leave a "
         "number floating with no label.\n\n"
+        "LINKS: if any tool result contains a URL (e.g. a news article "
+        "link), include exactly ONE of them - the single most relevant to "
+        "the question - verbatim, on its own at the very end of your "
+        "reply. Never paraphrase, shorten, or wrap it in markdown. If "
+        "multiple tool results have URLs, pick just one and drop the "
+        "rest.\n\n"
         "You must always write a reply, even when no tool data was "
         "gathered - greetings, thanks, opinions, meta questions about the "
         "conversation, and non-football questions all still get a short, "
@@ -296,19 +302,38 @@ def personality_node(state: AgentState):
     # The last turn before this is always an assistant message (tool call or
     # plain reply), and this model rejects a request that doesn't end on a
     # user turn - so cap the context with a synthetic cue instead of raw history.
+    # Tested reasoning_effort low/medium/high here: none fixed the model
+    # claiming a category's data "wasn't pulled" when its tool results were
+    # right there in a long multi-category transcript (a lost-in-the-middle
+    # grounding failure, not a thinking-budget one) - so give it an explicit
+    # checklist of which categories actually ran instead of making it infer
+    # that from the raw tool-call history.
+    categories_ran = state.get("categories") or []
+    checklist = (
+        [HumanMessage(content=(
+            "These data categories were queried for this turn and their tool "
+            "results are already in the messages above: "
+            + ", ".join(categories_ran) + ". Do not claim data wasn't "
+            "gathered for any of these - re-read the tool results above if "
+            "you're unsure what they returned."
+        ))]
+        if categories_ran else []
+    )
     context = (
         [_personality_system()]
         + state["messages"]
+        + checklist
         + [HumanMessage(content="Reply now, per your instructions.")]
     )
 
     def _llm(key):
-        # reasoning_effort="low": this node only writes a short, in-character
-        # reply from data already gathered - it doesn't need to burn a large
-        # reasoning budget, and doing so on ambiguous/off-topic turns has been
-        # seen to consume the entire output budget on "thinking" and leave no
-        # text behind, i.e. an empty reply.
-        return ChatGoogleGenerativeAI(model=MODEL, google_api_key=key, reasoning_effort="low")
+        # reasoning_effort="high": raised from "low" on request. "low" was
+        # previously chosen because higher effort was seen to burn the whole
+        # output budget on "thinking" on ambiguous/off-topic turns and leave
+        # no text behind (empty reply) - the categories_ran checklist above
+        # already fixed the actual grounding bug this was raised to fix, so
+        # re-verify the empty-reply case after any prompt change here.
+        return ChatGoogleGenerativeAI(model=MODEL, google_api_key=key, reasoning_effort="high")
 
     emit("node_start", node="personality")
     t0 = time.monotonic()
