@@ -24,10 +24,12 @@ from pydantic import BaseModel
 
 from fantasy_agent.chart_render import render_chart_png
 from fantasy_agent.graph import build_graph
+from fantasy_agent.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_espn.espn_client import current_league_id
 
 app = FastAPI()
 graph = build_graph()
+weekly_recap_graph = build_weekly_recap_graph()
 
 _sessions: dict[str, list] = {}
 
@@ -62,6 +64,28 @@ async def chart(req: dict):
     if png_bytes is None:
         raise HTTPException(status_code=422, detail="unrecognized chart shape")
     return Response(content=png_bytes, media_type="image/png")
+
+
+class WeeklyRecapRequest(BaseModel):
+    league_id: int
+    week: int = 0
+
+
+@app.post("/api/weekly-recap")
+async def weekly_recap(req: WeeklyRecapRequest):
+    current_league_id.set(req.league_id)
+    try:
+        result = await asyncio.to_thread(
+            weekly_recap_graph.invoke, {"week": req.week}
+        )
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+
+    return {
+        "week": result["week"],
+        "matchup_recaps": result["matchup_recaps"],
+        "league_summary": result["league_summary"],
+    }
 
 
 @app.post("/api/reset")
