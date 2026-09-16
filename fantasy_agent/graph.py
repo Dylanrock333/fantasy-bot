@@ -4,12 +4,17 @@
                 (standings, roster, nfl_team, ...) via structured output.
                 Never calls tools itself, never talks to the user.
   run_category - one instance per chosen category, dispatched in parallel via
-                Send. Only sees that category's own (small) tool list, and
+                Send. Has every tool from every category available, and
                 loops tool-calls <-> itself until it has enough data.
   personality - the only node that talks to the user. Writes the final,
                 short, in-character reply from every category's gathered data.
+  critique    - reviews personality's reply against the gathered data; if it
+                judges more data would meaningfully improve the answer it
+                sends the plan back through supervisor for one more pass
+                (capped by MAX_CRITIQUE_ROUNDS), otherwise ends.
 
-    START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality -> END
+    START -> supervisor -> Send(run_category) x N (parallel, or none)
+           -> personality -> critique -> (supervisor | END)
 """
 import os
 import time
@@ -28,8 +33,8 @@ from fantasy_agent.trace import emit
 
 TRACE_TRUNCATE = 800
 
-MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.5-flash")
-MAX_TOOL_ROUNDS = 4
+MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.7-flash")
+MAX_TOOL_ROUNDS = 8
 
 API_KEY = os.environ.get("GOOGLE_API_KEY")
 
@@ -42,6 +47,10 @@ def invoke_llm(build_llm, *args, **kwargs):
 _CATEGORY_LIST = "\n".join(
     f"- {name}: {desc}" for name, desc in CATEGORY_DESCRIPTIONS.items()
 )
+
+_ALL_TOOLS = [tool for tools in CATEGORY_REGISTRY.values() for tool in tools]
+
+MAX_CRITIQUE_ROUNDS = 1
 
 
 def _today() -> str:
@@ -66,7 +75,9 @@ def _supervisor_system() -> SystemMessage:
         "the recommendation. Then pick every category needed to gather that "
         "data, and skip any category that wouldn't add anything. Pick no "
         "categories for greetings, opinions, or follow-up chat that needs no "
-        "new data.\n\n"
+        "new data. Otherwise, err toward including a category if it could "
+        "plausibly add useful supporting detail - a marginal category costs "
+        "little, but a missing one produces a guess.\n\n"
         "Examples:\n"
         "Q: \"Who has the better defense, Vikings or Jaguars?\"\n"
         "reasoning: A defense comparison needs actual defensive production for "
@@ -113,7 +124,7 @@ def _personality_system() -> SystemMessage:
         "assumption, or 'usually.' If the gathered data doesn't cover part "
         "of the question, say so explicitly (e.g. 'no coach data was "
         "pulled for this') rather than guessing.\n\n"
-        "Keep replies SHORT: 2-5 sentences by default, and never more than "
+        "Keep replies SHORT: 4-10 sentences by default, and never more than "
         "a tight bulleted list for things like standings or rosters. No "
         "filler, no restating the question, no disclaimers beyond flagging "
         "genuinely missing data. Label every bare number with a short unit "
@@ -172,13 +183,29 @@ class AgentState(MessagesState):
     categories: List[str]
     category: str
     reasoning: str
+    critique_rounds: int
+    critique_satisfied: bool
+
+
+class Critique(BaseModel):
+    satisfied: bool = Field(
+        description="True if the final reply already fully and accurately "
+        "answers the user's question using the data gathered so far.",
+    )
+    missing: str = Field(
+        default="",
+        description="If not satisfied, what additional data/angle is "
+        "missing - fed back to the supervisor as its new plan.",
+    )
 
 
 def supervisor_node(state: AgentState):
     emit("node_start", node="supervisor")
     t0 = time.monotonic()
     choice = invoke_llm(
-        lambda key: ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).with_structured_output(CategoryChoice),
+        lambda key: ChatGoogleGenerativeAI(
+            model=MODEL, google_api_key=key, reasoning_effort="high"
+        ).with_structured_output(CategoryChoice),
         [_supervisor_system()] + state["messages"],
     )
     valid = [c for c in choice.categories if c in CATEGORY_REGISTRY]
@@ -207,11 +234,13 @@ def route_to_categories(state: AgentState):
 
 def run_category_node(state: AgentState):
     category = state["category"]
-    tools = CATEGORY_REGISTRY[category]
+    tools = _ALL_TOOLS
     tool_node = ToolNode(tools, handle_tool_errors=True)
     system = SystemMessage(content=(
-        f"Today's date is {_today()}. You retrieve data for the "
-        f"'{category}' category using only the tools provided. The "
+        f"Today's date is {_today()}. You were dispatched for the "
+        f"'{category}' category, but every tool from every category is "
+        "available to you here - use whichever ones actually serve the "
+        f"plan below, not just your own category's. The "
         f"supervisor's plan for this question: \"{state['reasoning']}\"\n"
         "Fantasy team/league names (e.g. \"Hurts Cooks with Lamb\") are "
         "arbitrary nicknames the user picked, often puns on player "
@@ -230,7 +259,9 @@ def run_category_node(state: AgentState):
     for _ in range(MAX_TOOL_ROUNDS):
         rounds += 1
         response = invoke_llm(
-            lambda key: ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).bind_tools(tools),
+            lambda key: ChatGoogleGenerativeAI(
+                model=MODEL, google_api_key=key, reasoning_effort="high"
+            ).bind_tools(tools),
             [system] + state["messages"] + local,
         )
         local.append(response)
@@ -332,17 +363,60 @@ def personality_node(state: AgentState):
     return {"messages": [response]}
 
 
+def critique_node(state: AgentState):
+    emit("node_start", node="critique")
+    t0 = time.monotonic()
+    result = invoke_llm(
+        lambda key: ChatGoogleGenerativeAI(
+            model=MODEL, google_api_key=key, reasoning_effort="high"
+        ).with_structured_output(Critique),
+        [SystemMessage(content=(
+            "You are a strict reviewer for a fantasy football chat bot. "
+            "Given the conversation, the tool data gathered, and the reply "
+            "just written, decide whether the reply fully and accurately "
+            "answers the user's question using only that gathered data. "
+            "Only flag it unsatisfied if pulling more data would "
+            "meaningfully change or improve the answer - never for style, "
+            "tone, or length."
+        ))] + state["messages"] + [HumanMessage(
+            content="Review the reply above now, per your instructions."
+        )],
+    )
+    emit(
+        "node_end", node="critique",
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        satisfied=result.satisfied, missing=result.missing,
+    )
+    return {
+        "critique_rounds": state.get("critique_rounds", 0) + 1,
+        "critique_satisfied": result.satisfied,
+        "reasoning": result.missing or state.get("reasoning", ""),
+    }
+
+
+def route_after_critique(state: AgentState):
+    if state.get("critique_satisfied", True):
+        return END
+    if state.get("critique_rounds", 0) > MAX_CRITIQUE_ROUNDS:
+        return END
+    return "supervisor"
+
+
 def build_graph():
     graph = StateGraph(AgentState)
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("run_category", run_category_node)
     graph.add_node("personality", personality_node)
+    graph.add_node("critique", critique_node)
 
     graph.add_edge(START, "supervisor")
     graph.add_conditional_edges(
         "supervisor", route_to_categories, ["run_category", "personality"]
     )
     graph.add_edge("run_category", "personality")
-    graph.add_edge("personality", END)
+    graph.add_edge("personality", "critique")
+    graph.add_conditional_edges(
+        "critique", route_after_critique, ["supervisor", END]
+    )
 
     return graph.compile()
