@@ -24,6 +24,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 class MatchupRecap(TypedDict):
     home_team: str
     away_team: str
+    home_score: float
+    away_score: float
     winner: str
     recap: str
 
@@ -89,20 +91,29 @@ def recap_matchup_node(state: _MatchupState):
     t0 = time.monotonic()
 
     system = SystemMessage(content=(
-        "You are the sharp, funny voice of a fantasy football league's weekly "
-        "recap channel. Write a SHORT (3-5 sentence) recap of one matchup. Be "
-        "genuinely funny and a little roast-y, not generic hype.\n\n"
+        "You are the foul-mouthed, brutally honest voice of a fantasy "
+        "football league's weekly recap channel. Write a SHORT (3-5 "
+        "sentence) recap of one matchup. Actually be funny, not "
+        "generic-hype-with-an-exclamation-point funny - mean, blunt, "
+        "and profane is encouraged. Cussing is allowed and welcome.\n\n"
         "HARD RULE: every player name, stat, and score you mention must come "
         "from the box score data given below - never invent or assume a stat.\n\n"
         "Cover whatever actually stands out in the data, e.g.: the top "
-        "performer, a notable bust (started, low points vs projection), a "
-        "'clutch' player who beat their projection and mattered to the "
-        "margin, and - importantly - check whether a benched player scored "
-        "more than the starter in their same position group; if so, call out "
-        "that the bench player could have won or widened the match. Only "
-        "mention what the data actually shows; skip anything that doesn't "
-        "apply to this matchup rather than forcing it in.\n\n"
-        "End with who won and the final score."
+        "performer, a notable bust (started, low points vs projection - "
+        "roast them for it in your own words), a 'clutch' player who beat "
+        "their projection and mattered to the margin, and - importantly - "
+        "check whether a benched player scored more than the starter in "
+        "their same position group; if so, roast the manager for that call. "
+        "Only mention what the data actually shows; skip anything that "
+        "doesn't apply to this matchup rather than forcing it in.\n\n"
+        "Don't hedge the insults - commit to them, but vary your language "
+        "and angle of attack each time. Don't lean on the same stock "
+        "phrases or jokes recap after recap. End with who won and the "
+        "final score.\n\n"
+        "Formatting: this is posted to Discord. Wrap every team name in "
+        "double asterisks for bold (e.g. **Team Name**) every time it "
+        "appears, since these are custom user-chosen names and otherwise "
+        "blend into the text. Don't bold player names."
     ))
     prompt = HumanMessage(content=(
         f"Week {state['week']} matchup: {state['home_team']} {state['home_score']} "
@@ -121,6 +132,8 @@ def recap_matchup_node(state: _MatchupState):
     return {"matchup_recaps": [{
         "home_team": state["home_team"],
         "away_team": state["away_team"],
+        "home_score": state["home_score"],
+        "away_score": state["away_score"],
         "winner": winner,
         "recap": text.strip(),
     }]}
@@ -137,16 +150,37 @@ def league_summary_node(state: WeeklyRecapState):
         for i, t in enumerate(standings, start=1)
     ]
     recap_lines = [
-        f"{r['home_team']} vs {r['away_team']}: winner {r['winner']}"
+        f"{r['home_team']} {r['home_score']} - {r['away_score']} {r['away_team']}: "
+        f"winner {r['winner']}"
         for r in state["matchup_recaps"]
     ]
 
     system = SystemMessage(content=(
-        "You are the voice of a fantasy football league's weekly recap "
-        "channel. Write a short (4-6 sentence) league-wide wrap-up for this "
-        "week: standings movement, who is playing well overall, who is "
-        "cratering, and anything notable across the week's results. Every "
-        "fact must come from the data given - never invent a stat."
+        "You are the foul-mouthed, brutally honest voice of a fantasy "
+        "football league's weekly recap channel. Write a short (4-6 "
+        "sentence) league-wide wrap-up for this week: standings movement, "
+        "who is playing well overall, who is cratering, and anything "
+        "notable across the week's results. Actually be funny, not "
+        "generic-hype funny - mean, blunt, and profane is encouraged.\n\n"
+        "Every team should get at least a brief mention. As a baseline, give "
+        "teams that won this week a little bit of props, and give teams "
+        "that lost a bit of shit for it - nothing elaborate needed there, "
+        "just a quick line. Save the real roasting (or real praise) for "
+        "whichever results actually stand out - use your own judgment on "
+        "which teams earned that versus which ones just get the baseline "
+        "line.\n\n"
+        "Look across this week's matchup scores (given below) to find "
+        "whoever scored the most and least points in the whole league this "
+        "week - this is independent of who won their own matchup, since a "
+        "high scorer can still lose and a low scorer can still win. That's "
+        "usually worth calling out. Also call out standings movement when "
+        "something actually moved, like a big jump/drop or a tightening "
+        "race. Every fact must come from the data given - never invent a "
+        "stat.\n\n"
+        "Formatting: this is posted to Discord. Wrap every team name in "
+        "double asterisks for bold (e.g. **Team Name**) every time it "
+        "appears, since these are custom user-chosen names and otherwise "
+        "blend into the text."
     ))
     prompt = HumanMessage(content=(
         f"Week {state['week']} results:\n" + "\n".join(recap_lines) +
