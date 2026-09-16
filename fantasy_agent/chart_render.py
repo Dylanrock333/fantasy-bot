@@ -1,5 +1,5 @@
 """Renders the bot's ```chart``` JSON payload (`bar`/`comparison` shapes) to
-a PNG. Shared by api/server.py's /api/chart (returns the bytes straight to
+a PNG. Shared by fantasy_agent/server.py's /api/chart (returns the bytes straight to
 the Discord bot) and tests/chat_audit.py (writes the bytes to a report
 file) so the chart schema is defined in exactly one place.
 """

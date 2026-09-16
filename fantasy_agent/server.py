@@ -1,6 +1,6 @@
 """API server for fantasy_agent - the Discord bot is its only client.
 
-Run: uvicorn api.server:app --reload --reload-dir api --reload-dir fantasy_agent --port 8787
+Run: uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port 8787
 
 /api/chat runs the graph and returns the reply as plain JSON.
 /api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.

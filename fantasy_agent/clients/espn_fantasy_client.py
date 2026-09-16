@@ -15,7 +15,7 @@ load_dotenv()
 YEAR = 2026
 TTL_SECONDS = 30 * 60 #Every well
 
-# Set once per request (in api/server.py) so tool calls deep in the graph
+# Set once per request (in fantasy_agent/server.py) so tool calls deep in the graph
 # know which league to fetch, without threading league_id through every
 # tool signature - those are dictated by the LLM, not the app.
 current_league_id: ContextVar[int] = ContextVar("current_league_id")

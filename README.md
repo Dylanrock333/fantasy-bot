@@ -14,18 +14,18 @@ reply back as plain JSON (no streaming - there's no web app to stream to).
 ## Layout
 
 ```
-fantasy_agent/       The LangGraph agent itself
+fantasy_agent/       The LangGraph agent and the FastAPI server around it
   graph.py             Builds the graph: supervisor -> Send(run_category) x N -> personality
   trace.py             emit() event hook nodes call instead of print(), for a consistent,
                         greppable log shape
   chart_render.py       Renders the bot's ```chart``` JSON (bar/comparison) to a PNG -
-                         shared by api/server.py's /api/chart and tests/chat_audit.py
+                         shared by server.py's /api/chart and tests/chat_audit.py
   tools/                One module per category (fantasy_*, nfl_*), each exporting TOOLS;
                          tools/__init__.py wires them into CATEGORY_REGISTRY
   clients/              espn_fantasy_client.py (private league auth + League cache) and
                         espn_nfl_client.py (public NFL data API, no auth)
-api/                 FastAPI server - the whole surface Discord talks to
-  server.py            /api/chat, /api/chart (chart JSON -> PNG) - plain
+  server.py            FastAPI server - the whole surface Discord talks to:
+                        /api/chat, /api/chart (chart JSON -> PNG) - plain
                         JSON in, JSON/PNG out, no streaming
 docs/                Consolidated reference docs (see below)
 ```
@@ -41,7 +41,6 @@ graph itself works.
 
 ```bash
 python3 -m venv venv && venv/bin/pip install -r requirements.txt
-git config core.hooksPath .githooks   # strips AI co-author/session-link trailers - this repo is public
 ```
 
 `.env` (gitignored) needs:
@@ -56,7 +55,7 @@ private league - update those two constants there if either changes.
 ## Running it
 
 ```bash
-venv/bin/uvicorn api.server:app --reload --reload-dir api --reload-dir fantasy_agent --port 8787
+venv/bin/uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port 8787
 ```
 Point the Discord bot's `FANTASY_AGENT_URL` at `http://localhost:8787` (its
 default). To reach it from another machine without opening a public port,
