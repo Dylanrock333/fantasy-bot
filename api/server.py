@@ -83,8 +83,8 @@ async def weekly_recap(req: WeeklyRecapRequest):
 
     return {
         "week": result["week"],
-        "matchup_recaps": result["matchup_recaps"],
         "league_summary": result["league_summary"],
+        "power_rankings": result["power_rankings"],
     }
 
 

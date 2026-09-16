@@ -29,14 +29,13 @@ def main():
     graph = build_weekly_recap_graph()
     result = graph.invoke({"week": args.week})
 
-    print(f"\n=== Week {result['week']} recaps ===\n")
-    for r in result["matchup_recaps"]:
-        print(f"-- {r['home_team']} vs {r['away_team']} (winner: {r['winner']}) --")
-        print(r["recap"])
-        print()
-
-    print("=== League summary ===\n")
+    print(f"\n=== Week {result['week']} League Summary ===\n")
     print(result["league_summary"])
+
+    print("\n=== Power Rankings ===\n")
+    for i, r in enumerate(result["power_rankings"], start=1):
+        print(f"#{i} {r['tag']} — {r['team']}")
+        print(f"    {r['blurb']}")
 
 
 if __name__ == "__main__":
