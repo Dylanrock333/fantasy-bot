@@ -7,7 +7,7 @@ from datetime import datetime
 
 from langchain_core.tools import tool
 
-from ..clients.nfl_client import (
+from ..clients.espn_nfl_client import (
     ATHLETE_API,
     CORE_API,
     SITE_API,

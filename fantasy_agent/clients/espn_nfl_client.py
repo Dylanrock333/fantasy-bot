@@ -3,8 +3,9 @@
 See docs/NFL_PUBLIC_API.md for the full endpoint reference this wraps.
 
 Source: https://github.com/pseudo-r/Public-ESPN-API/blob/main/docs/sports/football.md
-No API key, espn_s2, or SWID required — contrast with fantasy_espn/espn_client.py,
-which authenticates against your private fantasy league.
+No API key, espn_s2, or SWID required — contrast with
+fantasy_agent/clients/espn_fantasy_client.py, which authenticates against
+your private fantasy league.
 """
 import requests
 from rapidfuzz import fuzz, process

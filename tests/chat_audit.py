@@ -1,11 +1,11 @@
 """Manual audit tool: runs a fixed list of prompts through the LangGraph
 agent (in-process, no server needed) and writes each run's full trace
 (supervisor reasoning, tool calls/results, final reply) to one report file
-under scripts/audit_output/<timestamp>/, with any chart JSON rendered to a
+under tests/audit_output/<timestamp>/, with any chart JSON rendered to a
 PNG and embedded - open report.md's Preview in VS Code to see it inline.
 
 Add/edit prompts below as you find bugs worth re-checking, then:
-    python scripts/chat_audit.py
+    python tests/chat_audit.py
 """
 import json
 import re

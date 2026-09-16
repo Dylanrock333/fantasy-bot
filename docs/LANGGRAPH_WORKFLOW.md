@@ -112,13 +112,10 @@ doesn't need to reason further. Without that cap, vague or off-topic turns
 have been seen to burn their whole output budget on internal reasoning and
 come back with no actual reply text.
 
-`invoke_with_fallback()` wraps every model call: try `GOOGLE_API_KEY`
-first, and if it fails in a way a second key could plausibly fix (HTTP
-429, or an error mentioning "quota"/"credit balance"), retry once against
-`GOOGLE_API_KEY_BACKUP` if one's configured. Anything else just fails.
+`invoke_llm()` wraps every model call with `GOOGLE_API_KEY`.
 
-`personality` has one more fallback on top of that: if the model call comes
-back with no text at all, it falls back to a fixed "Sorry, I didn't quite
+`personality` has one fallback of its own: if the model call comes back
+with no text at all, it falls back to a fixed "Sorry, I didn't quite
 catch that" instead of showing the user an empty message.
 
 ## State shape
@@ -134,7 +131,7 @@ Every node calls `fantasy_agent/trace.py`'s `emit()` around its work
 (`node_start`/`node_end` pairs, plus `tool_call`/`tool_result` inside
 `run_category`) rather than printing directly. `emit()` just prints
 (`[trace] <event> <data>`) — it's a local log line, nothing consumes these
-over the network. `scripts/chat_audit.py` is the one place that reads them
+over the network. `tests/chat_audit.py` is the one place that reads them
 back, by temporarily monkeypatching `trace.emit` to also capture events
 into its report.
 

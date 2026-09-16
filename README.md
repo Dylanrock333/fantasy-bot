@@ -14,18 +14,18 @@ reply back as plain JSON (no streaming - there's no web app to stream to).
 ## Layout
 
 ```
-fantasy_espn/       Private ESPN fantasy-league client (espn_api-based) - needs league auth
 fantasy_agent/       The LangGraph agent itself
   graph.py             Builds the graph: supervisor -> Send(run_category) x N -> personality
   trace.py             emit() event hook nodes call instead of print(), for a consistent,
                         greppable log shape
   chart_render.py       Renders the bot's ```chart``` JSON (bar/comparison) to a PNG -
-                         shared by api/server.py's /api/chart and scripts/chat_audit.py
+                         shared by api/server.py's /api/chart and tests/chat_audit.py
   tools/                One module per category (fantasy_*, nfl_*), each exporting TOOLS;
                          tools/__init__.py wires them into CATEGORY_REGISTRY
-  clients/              Shared singletons (fantasy league client, public NFL data client)
+  clients/              espn_fantasy_client.py (private league auth + League cache) and
+                        espn_nfl_client.py (public NFL data API, no auth)
 api/                 FastAPI server - the whole surface Discord talks to
-  server.py            /api/chat, /api/chart (chart JSON -> PNG), /api/reset - plain
+  server.py            /api/chat, /api/chart (chart JSON -> PNG) - plain
                         JSON in, JSON/PNG out, no streaming
 docs/                Consolidated reference docs (see below)
 ```
@@ -47,12 +47,10 @@ git config core.hooksPath .githooks   # strips AI co-author/session-link trailer
 `.env` (gitignored) needs:
 ```
 GOOGLE_API_KEY=AIza...
-GOOGLE_API_KEY_BACKUP=AIza...          # optional - graph.py retries on this if the
-                                        # primary key is rate-limited or out of quota
 ESPN_S2=...                           # from your browser's espn.com cookies, private league auth
 SWID=...                              # same
 ```
-`fantasy_espn/espn_client.py` hardcodes `LEAGUE_ID` and `YEAR` for the
+`fantasy_agent/clients/espn_fantasy_client.py` hardcodes `LEAGUE_ID` and `YEAR` for the
 private league - update those two constants there if either changes.
 
 ## Running it
@@ -86,25 +84,3 @@ synthesizes once. That bounds it structurally - fixed fan-out, capped tool
 rounds, single synthesis step - so it can't infinite-loop, at the cost of
 not being able to request more data mid-reply if the initial classification
 missed something. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
-
-## Notes for whoever (human or agent) picks this up next
-
-- **Tracing**: every node emits structured events via `fantasy_agent/trace.py`'s
-  `emit()` instead of `print()` directly - it's a local log line only
-  (`[trace] event_type {...}`), nothing forwards these anywhere. If you add a
-  new node or a new kind of step worth surfacing, emit a `node_start`/`node_end`
-  pair (with `duration_ms`) around it. `scripts/chat_audit.py` monkeypatches
-  `trace.emit` to capture these events into its report - keep `emit`'s
-  signature (`event_type: str, **data`) stable for that.
-- **No streaming**: `api/server.py` and `personality_node` are both plain
-  request/response - there was an SSE-based streaming path here for a now-removed
-  web app, but Discord only ever consumed the final text anyway, so it's gone.
-  `personality_node` calls the LLM with a single `.invoke()`.
-- **Session state is in-memory only**, in `api/server.py`'s `_sessions` dict
-  (keyed by the caller-supplied `session_id`). Nothing persists across a
-  process restart - there's no database yet.
-- **Secrets**: `.env` and `venv/` are gitignored - keep it that way, never
-  commit `ESPN_S2`/`SWID`/API keys.
-- **This repo**: private GitHub repo at `github.com/Dylanrock333/fantasy-bot`,
-  `main` branch. `gh` CLI is installed and authenticated as `Dylanrock333`
-  on this machine if you need it for PRs/issues.

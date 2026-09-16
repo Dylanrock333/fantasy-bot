@@ -4,7 +4,7 @@ not fantasy matchups - see fantasy_matchup_tools.py for that.
 Resolves team+week into a game id, then pulls CDN/Core API game data."""
 from langchain_core.tools import tool
 
-from ..clients.nfl_client import CDN_API, CORE_API, get_json, resolve_event
+from ..clients.espn_nfl_client import CDN_API, CORE_API, get_json, resolve_event
 
 
 @tool

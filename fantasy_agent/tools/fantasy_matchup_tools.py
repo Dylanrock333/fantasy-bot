@@ -1,8 +1,8 @@
 """Fantasy league data: matchups, box scores, and week/period info (private
-league via fantasy_espn/, not real-NFL games)."""
+league via clients/espn_fantasy_client.py, not real-NFL games)."""
 from langchain_core.tools import tool
 
-from ..clients.fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton
 
 
 @tool

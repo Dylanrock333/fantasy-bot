@@ -1,8 +1,8 @@
 """Fantasy league data: transactions and activity (adds/drops/trades/waivers
-in your private league via fantasy_espn/, not real-NFL transactions)."""
+in your private league via clients/espn_fantasy_client.py, not real-NFL transactions)."""
 from langchain_core.tools import tool
 
-from ..clients.fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton
 
 
 @tool

@@ -1,8 +1,8 @@
 """Fantasy league data: free agents, single-player lookup by name, ownership/points
-(private league via fantasy_espn/ - for real-NFL athlete stats see nfl_player_tools.py)."""
+(private league via clients/espn_fantasy_client.py - for real-NFL athlete stats see nfl_player_tools.py)."""
 from langchain_core.tools import tool
 
-from ..clients.fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton
 
 
 @tool

@@ -2,7 +2,7 @@
 not your fantasy league - see fantasy_matchup_tools.py for that)."""
 from langchain_core.tools import tool
 
-from ..clients.nfl_client import SITE_API, SITE_API_STANDINGS, get_json
+from ..clients.espn_nfl_client import SITE_API, SITE_API_STANDINGS, get_json
 
 
 @tool

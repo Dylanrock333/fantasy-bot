@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env")
 
 from fantasy_agent.weekly_recap_graph import build_weekly_recap_graph
-from fantasy_espn.espn_client import current_league_id
+from fantasy_agent.clients.espn_fantasy_client import current_league_id
 
 
 def main():

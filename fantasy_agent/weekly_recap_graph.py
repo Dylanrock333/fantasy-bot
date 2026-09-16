@@ -16,8 +16,8 @@ from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
-from fantasy_agent.clients.fantasy_client import league_singleton
-from fantasy_agent.graph import invoke_with_fallback, MODEL
+from fantasy_agent.clients.espn_fantasy_client import league_singleton
+from fantasy_agent.graph import invoke_llm, MODEL
 from fantasy_agent.trace import emit
 
 
@@ -115,7 +115,7 @@ def league_summary_node(state: WeeklyRecapState):
             model=MODEL, google_api_key=key, reasoning_effort="high"
         ).with_structured_output(WeeklySummaryOutput)
 
-    result = invoke_with_fallback(_llm, [system, prompt])
+    result = invoke_llm(_llm, [system, prompt])
 
     emit("node_end", node="league_summary", duration_ms=int((time.monotonic() - t0) * 1000))
     return {

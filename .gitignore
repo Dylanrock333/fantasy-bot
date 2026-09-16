@@ -5,7 +5,7 @@ __pycache__/
 venv/
 .beads/
 skills-lock.json
-scripts/audit_output/
+tests/audit_output/
 
 # Beads / Dolt files (added by bd init)
 .dolt/

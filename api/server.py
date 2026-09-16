@@ -2,7 +2,6 @@
 
 Run: uvicorn api.server:app --reload --reload-dir api --reload-dir fantasy_agent --port 8787
 
-One in-memory conversation per caller-supplied session_id (no auth, no DB).
 /api/chat runs the graph and returns the reply as plain JSON.
 /api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.
 """
@@ -25,25 +24,20 @@ from pydantic import BaseModel
 from fantasy_agent.chart_render import render_chart_png
 from fantasy_agent.graph import build_graph
 from fantasy_agent.weekly_recap_graph import build_weekly_recap_graph
-from fantasy_espn.espn_client import current_league_id
+from fantasy_agent.clients.espn_fantasy_client import current_league_id
 
 app = FastAPI()
 graph = build_graph()
 weekly_recap_graph = build_weekly_recap_graph()
 
-_sessions: dict[str, list] = {}
-
-
 class ChatRequest(BaseModel):
-    session_id: str
     message: str
     league_id: int
 
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    messages = _sessions.setdefault(req.session_id, [])
-    messages.append(HumanMessage(content=req.message))
+    messages = [HumanMessage(content=req.message)]
     current_league_id.set(req.league_id)
 
     try:
@@ -51,10 +45,8 @@ async def chat(req: ChatRequest):
         # (including current_league_id) into the executor thread.
         result = await asyncio.to_thread(graph.invoke, {"messages": messages})
     except Exception as err:
-        messages.pop()  # drop the failed user turn so it isn't replayed next call
         raise HTTPException(status_code=500, detail=str(err))
 
-    _sessions[req.session_id] = result["messages"]
     return {"reply": result["messages"][-1].text}
 
 
@@ -86,9 +78,3 @@ async def weekly_recap(req: WeeklyRecapRequest):
         "league_summary": result["league_summary"],
         "power_rankings": result["power_rankings"],
     }
-
-
-@app.post("/api/reset")
-async def reset(req: dict):
-    _sessions.pop(req.get("session_id"), None)
-    return {"ok": True}

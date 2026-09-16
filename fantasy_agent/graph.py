@@ -16,7 +16,6 @@ import time
 from datetime import datetime
 from typing import List
 
-from google.genai.errors import APIError as GoogleAPIError
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, MessagesState, START, END
@@ -32,31 +31,12 @@ TRACE_TRUNCATE = 800
 MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.5-flash")
 MAX_TOOL_ROUNDS = 4
 
-PRIMARY_KEY = os.environ.get("GOOGLE_API_KEY")
-BACKUP_KEY = os.environ.get("GOOGLE_API_KEY_BACKUP")
+API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 
-def _is_exhausted(err: Exception) -> bool:
-    """True for errors a backup account/key could plausibly fix."""
-    if isinstance(err, GoogleAPIError):
-        if err.code == 429:  # rate limited or quota exceeded
-            return True
-        msg = str(err).lower()
-        return "credit balance" in msg or "quota" in msg
-    return False
-
-
-def invoke_with_fallback(build_llm, *args, **kwargs):
-    """Call build_llm(api_key).invoke(*args, **kwargs), retrying once against
-    GOOGLE_API_KEY_BACKUP if the primary key is rate-limited or out of credits.
-    """
-    try:
-        return build_llm(PRIMARY_KEY).invoke(*args, **kwargs)
-    except Exception as err:
-        if not BACKUP_KEY or not _is_exhausted(err):
-            raise
-        print(f"[fallback] primary Gemini key failed ({err}); retrying with backup key")
-        return build_llm(BACKUP_KEY).invoke(*args, **kwargs)
+def invoke_llm(build_llm, *args, **kwargs):
+    """Call build_llm(api_key).invoke(*args, **kwargs)."""
+    return build_llm(API_KEY).invoke(*args, **kwargs)
 
 
 _CATEGORY_LIST = "\n".join(
@@ -197,7 +177,7 @@ class AgentState(MessagesState):
 def supervisor_node(state: AgentState):
     emit("node_start", node="supervisor")
     t0 = time.monotonic()
-    choice = invoke_with_fallback(
+    choice = invoke_llm(
         lambda key: ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).with_structured_output(CategoryChoice),
         [_supervisor_system()] + state["messages"],
     )
@@ -249,7 +229,7 @@ def run_category_node(state: AgentState):
     rounds = 0
     for _ in range(MAX_TOOL_ROUNDS):
         rounds += 1
-        response = invoke_with_fallback(
+        response = invoke_llm(
             lambda key: ChatGoogleGenerativeAI(model=MODEL, google_api_key=key).bind_tools(tools),
             [system] + state["messages"] + local,
         )
@@ -337,7 +317,7 @@ def personality_node(state: AgentState):
 
     emit("node_start", node="personality")
     t0 = time.monotonic()
-    full_text = _chunk_text(invoke_with_fallback(_llm, context))
+    full_text = _chunk_text(invoke_llm(_llm, context))
 
     if not full_text.strip():
         full_text = "Sorry, I didn't quite catch that - could you rephrase?"

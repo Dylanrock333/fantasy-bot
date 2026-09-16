@@ -1,9 +1,9 @@
 """Fantasy league data: standings (current or as-of a given week), top/bottom
 scorers, points against, power rankings, and lowest single-week score (your
-private ESPN fantasy league via fantasy_espn/, not real-NFL data)."""
+private ESPN fantasy league via clients/espn_fantasy_client.py, not real-NFL data)."""
 from langchain_core.tools import tool
 
-from ..clients.fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton
 
 
 @tool

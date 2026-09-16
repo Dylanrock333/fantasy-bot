@@ -2,7 +2,7 @@
 (ESPN's public API)."""
 from langchain_core.tools import tool
 
-from ..clients.nfl_client import ATHLETE_API, SITE_API, get_json, resolve_athlete
+from ..clients.espn_nfl_client import ATHLETE_API, SITE_API, get_json, resolve_athlete
 
 
 def _best_link(articles: list[dict]) -> str | None:

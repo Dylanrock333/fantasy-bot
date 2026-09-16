@@ -8,7 +8,7 @@ unauthenticated real-NFL data.
 
 The singleton client lives at `fantasy_agent/clients/fantasy_client.py`
 (`league_singleton()`); `LEAGUE_ID`/`YEAR` are hardcoded in
-`fantasy_espn/espn_client.py` — update those two constants there if either
+`fantasy_agent/clients/espn_fantasy_client.py` — update those two constants there if either
 changes.
 
 ```python

@@ -4,7 +4,7 @@ takeaways, etc.), and league conference/division structure (ESPN's public
 API, not your fantasy rosters - see fantasy_roster_tools.py for that)."""
 from langchain_core.tools import tool
 
-from ..clients.nfl_client import SITE_API, get_json, resolve_team
+from ..clients.espn_nfl_client import SITE_API, get_json, resolve_team
 
 
 @tool

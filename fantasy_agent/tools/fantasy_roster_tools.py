@@ -1,12 +1,12 @@
 """Fantasy league data: your teams' rosters, league rules/settings, and
-draft results (private league via fantasy_espn/, not real-NFL rosters/depth
-charts)."""
+draft results (private league via clients/espn_fantasy_client.py, not
+real-NFL rosters/depth charts)."""
 from datetime import datetime
 
 from langchain_core.tools import tool
 from rapidfuzz import fuzz, process
 
-from ..clients.fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton
 
 
 @tool
