@@ -4,8 +4,11 @@ Run: uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port
 
 /api/chat runs the graph and returns the reply as plain JSON.
 /api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.
+/api/weekly-recap's power_ranking_image_base64 is base64 PNG, or null if
+image generation failed - see weekly_recap_graph.py's power_ranking_image_node.
 """
 import asyncio
+import base64
 import sys
 from pathlib import Path
 
@@ -73,8 +76,12 @@ async def weekly_recap(req: WeeklyRecapRequest):
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
 
+    image_bytes = result.get("power_ranking_image")
     return {
         "week": result["week"],
         "league_summary": result["league_summary"],
         "power_rankings": result["power_rankings"],
+        "power_ranking_image_base64": (
+            base64.b64encode(image_bytes).decode("ascii") if image_bytes else None
+        ),
     }

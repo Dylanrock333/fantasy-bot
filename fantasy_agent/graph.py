@@ -34,7 +34,7 @@ from fantasy_agent.trace import emit
 TRACE_TRUNCATE = 800
 
 MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.7-flash")
-MAX_TOOL_ROUNDS = 8
+MAX_TOOL_ROUNDS = 5
 
 API_KEY = os.environ.get("GOOGLE_API_KEY")
 
@@ -124,7 +124,7 @@ def _personality_system() -> SystemMessage:
         "assumption, or 'usually.' If the gathered data doesn't cover part "
         "of the question, say so explicitly (e.g. 'no coach data was "
         "pulled for this') rather than guessing.\n\n"
-        "Keep replies SHORT: 4-10 sentences by default, and never more than "
+        "Keep replies SHORT: 2-6 sentences by default, and never more than "
         "a tight bulleted list for things like standings or rosters. No "
         "filler, no restating the question, no disclaimers beyond flagging "
         "genuinely missing data. Label every bare number with a short unit "
@@ -260,7 +260,7 @@ def run_category_node(state: AgentState):
         rounds += 1
         response = invoke_llm(
             lambda key: ChatGoogleGenerativeAI(
-                model=MODEL, google_api_key=key, reasoning_effort="high"
+                model=MODEL, google_api_key=key, reasoning_effort="low"
             ).bind_tools(tools),
             [system] + state["messages"] + local,
         )
@@ -368,7 +368,7 @@ def critique_node(state: AgentState):
     t0 = time.monotonic()
     result = invoke_llm(
         lambda key: ChatGoogleGenerativeAI(
-            model=MODEL, google_api_key=key, reasoning_effort="high"
+            model=MODEL, google_api_key=key, reasoning_effort="medium"
         ).with_structured_output(Critique),
         [SystemMessage(content=(
             "You are a strict reviewer for a fantasy football chat bot. "
