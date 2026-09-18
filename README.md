@@ -31,7 +31,9 @@ fantasy_agent/       The LangGraph agent and the FastAPI server around it
                         to a PNG - shared by server.py's /api/chart and tests/chat_audit.py;
                         image_gen.py / openai_image_gen.py generate recap/preview poster images
   server.py            FastAPI server - the whole surface Discord talks to:
-                        /api/chat, /api/chart (chart JSON -> PNG), /api/weekly-recap,
+                        /api/chat, /api/league/{league_id}/teams,
+                        /api/league/{league_id}/teams/{team_id}/players,
+                        /api/chart (chart JSON -> PNG), /api/weekly-recap,
                         /api/matchup-preview - plain JSON in/out (the two recap/preview
                         endpoints embed their poster PNG as base64 in the JSON, or
                         null if image generation failed), no streaming
