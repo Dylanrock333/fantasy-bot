@@ -18,8 +18,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 from fantasy_agent.clients.espn_fantasy_client import league_singleton
-from fantasy_agent.graph import invoke_llm, MODEL
-from fantasy_agent.trace import emit
+from fantasy_agent.graphs.graph import invoke_llm, MODEL
+from fantasy_agent.logging.trace import emit
 from fantasy_agent.utils.openai_image_gen import generate_image
 
 
@@ -79,9 +79,13 @@ class PowerRankingEntry(BaseModel):
 
 class WeeklySummaryOutput(BaseModel):
     league_summary: str = Field(
-        description="One tight paragraph (4-6 sentences): standings "
-        "movement, who's playing well, who's cratering, anything notable "
-        "this week. Every fact must come from the data given."
+        description="The week's recap broken into 3-5 short beats "
+        "separated by a blank line (double newline) - NOT one dense "
+        "paragraph. Each beat is 1-2 punchy sentences on a single "
+        "storyline: standings movement, who's playing well, who's "
+        "cratering, anything notable this week. One storyline per beat, "
+        "don't stack multiple unrelated facts into the same sentence "
+        "with commas. Every fact must come from the data given."
     )
     power_rankings: List[PowerRankingEntry] = Field(
         description="Every team in the league, ordered #1 (best) to last "
@@ -109,9 +113,11 @@ def league_summary_node(state: WeeklyRecapState):
         "channel, written for a rowdy, joke-heavy group chat. Produce two "
         "things from the data below - every fact must come from that data, "
         "never invented:\n\n"
-        "1. league_summary: one tight paragraph (4-6 sentences) covering "
-        "standings movement, who is playing well overall, who is "
-        "cratering, and anything notable across the week's results. Max "
+        "1. league_summary: standings movement, who is playing well "
+        "overall, who is cratering, and anything notable across the "
+        "week's results - broken into 3-5 short beats separated by a "
+        "blank line (double newline), one storyline per beat, NOT one "
+        "dense paragraph. Max "
         "unhinged - no filter, no restraint, borderline deranged. Roast "
         "people mercilessly, reach for the most chaotic and unhinged "
         "comparison you can think of for every result (crime scenes, "
@@ -159,6 +165,8 @@ def power_ranking_image_node(state: WeeklyRecapState):
     emit("node_start", node="power_ranking_image")
     t0 = time.monotonic()
 
+    league_name = league_singleton().settings.name
+
     rank_by_team = {pr["team"]: pr for pr in state["power_rankings"]}
     matchup_lines = []
     for m in state["matchups"]:
@@ -178,10 +186,12 @@ def power_ranking_image_node(state: WeeklyRecapState):
         f"football league's Week {state['week']} results. Wide landscape "
         "layout. Dark background, punchy sports-broadcast typography, a "
         "grid of matchup cards (two teams per card, 'VS' between them). "
-        "Each team's card shows: its team name printed as plain text "
-        "exactly as given, never wrapped in a label like 'Team(Name)' or "
-        "any other function/placeholder syntax, its score for the week, a "
-        "colored badge, and a bold mascot-style icon illustration. THE "
+        "Each team's card shows: its team name printed as plain readable "
+        "text exactly as spelled below, the way a real sports broadcast "
+        "graphic prints a team name - nothing else attached to it, no "
+        "field labels, no surrounding punctuation or symbols beyond "
+        "what's in the name itself; its score for the week; a colored "
+        "badge; and a bold mascot-style icon illustration. THE "
         "BADGE TEXT MUST BE THE EXACT QUOTED STRING GIVEN BELOW FOR THAT "
         "TEAM, verbatim including the rank number and emoji - do not "
         "shorten it, translate it into a generic word like "
@@ -197,8 +207,10 @@ def power_ranking_image_node(state: WeeklyRecapState):
         "overlaps with one - invent your own illustration instead. Keep "
         "every mascot icon in the same bold flat-illustration style "
         "across the whole poster so it reads as one consistent set. "
-        f"Title the graphic something like 'WEEK {state['week']} "
-        "RESULTS'.\n\n"
+        f"Put the league name, \"{league_name}\", as the main header in "
+        "large, bold, stylized lettering at the top of the poster. At "
+        "the bottom, in noticeably smaller text, print "
+        f"'WEEK {state['week']} RECAP'.\n\n"
         "Matchups (badge text for each team is in quotes):\n" +
         "\n".join(matchup_lines)
     )

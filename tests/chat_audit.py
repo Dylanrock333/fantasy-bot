@@ -21,9 +21,9 @@ load_dotenv(ROOT / ".env")
 
 from langchain_core.messages import HumanMessage
 
-from fantasy_agent import trace
-from fantasy_agent.chart_render import render_chart_png
-from fantasy_agent.graph import build_graph
+from fantasy_agent.logging import trace
+from fantasy_agent.utils.chart_render import render_chart_png
+from fantasy_agent.graphs.graph import build_graph
 
 PROMPTS = [
     "Who has the better defense, Vikings or Jaguars?",

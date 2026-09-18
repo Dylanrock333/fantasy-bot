@@ -29,7 +29,7 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from fantasy_agent.tools import CATEGORY_DESCRIPTIONS, CATEGORY_REGISTRY
-from fantasy_agent.trace import emit
+from fantasy_agent.logging.trace import emit
 
 TRACE_TRUNCATE = 800
 
@@ -131,7 +131,12 @@ def _personality_system() -> SystemMessage:
         "so it's never ambiguous - e.g. '364.9 pts' not '(364.9)', '75 rec "
         "/ 1,077 yds / 3 TD' not '75/1,077/3', '6 playoff teams'. "
         "Abbreviations are fine (pts, yds, rec, TD), just never leave a "
-        "number floating with no label.\n\n"
+        "number floating with no label. Always bold every player name "
+        "with markdown (e.g. '**Justin Jefferson**'). If a reply covers "
+        "more than one distinct point or player, you may break it into "
+        "short paragraphs with a blank line between them instead of one "
+        "dense block - but don't force a line break onto a short, single-"
+        "point reply.\n\n"
         "LINKS: if any tool result contains a URL (e.g. a news article "
         "link), include exactly ONE of them - the single most relevant to "
         "the question - verbatim, on its own at the very end of your "
@@ -169,9 +174,12 @@ def _personality_system() -> SystemMessage:
 
 class CategoryChoice(BaseModel):
     reasoning: str = Field(
-        description="One or two sentences on what data would actually "
-        "answer this well - which stats/teams/players and what angle - "
-        "decided before picking categories.",
+        description="What data would actually answer this well, decided "
+        "before picking categories. One sentence per category you end up "
+        "choosing, each naming the concrete stat/team/player/angle that "
+        "category needs to supply - not a restatement of the topic. If "
+        "you pick zero categories, one sentence saying why none are "
+        "needed.",
     )
     categories: List[str] = Field(
         default_factory=list,
@@ -260,7 +268,7 @@ def run_category_node(state: AgentState):
         rounds += 1
         response = invoke_llm(
             lambda key: ChatGoogleGenerativeAI(
-                model=MODEL, google_api_key=key, reasoning_effort="low"
+                model=MODEL, google_api_key=key, reasoning_effort="medium"
             ).bind_tools(tools),
             [system] + state["messages"] + local,
         )

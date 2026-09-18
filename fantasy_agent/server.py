@@ -6,6 +6,8 @@ Run: uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port
 /api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.
 /api/weekly-recap's power_ranking_image_base64 is base64 PNG, or null if
 image generation failed - see weekly_recap_graph.py's power_ranking_image_node.
+/api/matchup-preview's matchup_image_base64 is base64 PNG, or null if
+image generation failed - see matchup_preview_graph.py's matchup_image_node.
 """
 import asyncio
 import base64
@@ -24,14 +26,16 @@ from fastapi import FastAPI, HTTPException, Response
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from fantasy_agent.chart_render import render_chart_png
-from fantasy_agent.graph import build_graph
-from fantasy_agent.weekly_recap_graph import build_weekly_recap_graph
+from fantasy_agent.utils.chart_render import render_chart_png
+from fantasy_agent.graphs.graph import build_graph
+from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
+from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
 from fantasy_agent.clients.espn_fantasy_client import current_league_id
 
 app = FastAPI()
 graph = build_graph()
 weekly_recap_graph = build_weekly_recap_graph()
+matchup_preview_graph = build_matchup_preview_graph()
 
 class ChatRequest(BaseModel):
     message: str
@@ -82,6 +86,34 @@ async def weekly_recap(req: WeeklyRecapRequest):
         "league_summary": result["league_summary"],
         "power_rankings": result["power_rankings"],
         "power_ranking_image_base64": (
+            base64.b64encode(image_bytes).decode("ascii") if image_bytes else None
+        ),
+    }
+
+
+class MatchupPreviewRequest(BaseModel):
+    league_id: int
+    week: int = 0
+    previous_recap_context: str | None = None
+
+
+@app.post("/api/matchup-preview")
+async def matchup_preview(req: MatchupPreviewRequest):
+    current_league_id.set(req.league_id)
+    try:
+        result = await asyncio.to_thread(
+            matchup_preview_graph.invoke,
+            {"week": req.week, "previous_recap_context": req.previous_recap_context},
+        )
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+
+    image_bytes = result.get("matchup_image")
+    return {
+        "week": result["week"],
+        "league_preview": result["league_preview"],
+        "matchups": result["matchups"],
+        "matchup_image_base64": (
             base64.b64encode(image_bytes).decode("ascii") if image_bytes else None
         ),
     }

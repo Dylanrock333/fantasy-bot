@@ -1,6 +1,6 @@
 # LangGraph Workflow
 
-`fantasy_agent/graph.py` builds a simple three-step pipeline for every
+`fantasy_agent/graphs/graph.py` builds a simple three-step pipeline for every
 message: figure out what's being asked, go fetch the data for it (in
 parallel if more than one topic applies), then write one reply. It's not a
 free-form network of agents chatting with each other — each step runs
@@ -99,7 +99,7 @@ conversation itself. If the user explicitly asks for a chart or visual
 comparison, it emits one fenced ` ```chart ` code block with a JSON object
 instead of prose numbers (a `"comparison"` shape for several
 differently-scaled metrics, a `"bar"` shape for one metric across several
-things); `fantasy_agent/chart_render.py`'s `render_chart_png` turns that
+things); `fantasy_agent/utils/chart_render.py`'s `render_chart_png` turns that
 JSON into the PNG served at `/api/chart`.
 
 ## Model, keys, and retry
@@ -127,7 +127,7 @@ naming which category a given parallel branch belongs to.
 
 ## Tracing
 
-Every node calls `fantasy_agent/trace.py`'s `emit()` around its work
+Every node calls `fantasy_agent/logging/trace.py`'s `emit()` around its work
 (`node_start`/`node_end` pairs, plus `tool_call`/`tool_result` inside
 `run_category`) rather than printing directly. `emit()` just prints
 (`[trace] <event> <data>`) — it's a local log line, nothing consumes these

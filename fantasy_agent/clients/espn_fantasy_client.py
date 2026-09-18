@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from dotenv import load_dotenv
 from espn_api.football import League
 
-from fantasy_agent.trace import emit
+from fantasy_agent.logging.trace import emit
 
 load_dotenv()
 

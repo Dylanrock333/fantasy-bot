@@ -1,6 +1,8 @@
 langgraph>=1.2.11
 langchain-core>=1.5.5
 langchain-google-genai>=2.1.0
+google-genai>=2.21.0
+openai>=3.13.0
 espn-api>=0.46.0
 requests>=2.32.5
 rapidfuzz>=3.10.0

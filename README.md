@@ -5,28 +5,36 @@ your private ESPN fantasy league and public NFL sources, then replying in a
 short, opinionated voice. Built as a LangGraph supervisor + parallel
 category-worker graph so each data domain (roster, standings, injuries,
 scores, ...) is fetched by its own small, isolated tool-calling loop instead
-of one agent with every tool in scope.
+of one agent with every tool in scope. Two standalone LangGraph flows ride
+alongside the chat graph: a weekly recap (league summary + power rankings +
+a generated poster graphic) and a matchup preview (look-ahead summary +
+projections + a generated scoreboard graphic).
 
 The [Discord bot](https://github.com/Dylanrock333/the-fantasy-zone-discord)
-is the only client: it calls this API's `/api/chat` endpoint and gets the
-reply back as plain JSON (no streaming - there's no web app to stream to).
+is the only client: it calls this API's endpoints and gets JSON back (no
+streaming - there's no web app to stream to).
 
 ## Layout
 
 ```
 fantasy_agent/       The LangGraph agent and the FastAPI server around it
-  graph.py             Builds the graph: supervisor -> Send(run_category) x N -> personality
-  trace.py             emit() event hook nodes call instead of print(), for a consistent,
-                        greppable log shape
-  chart_render.py       Renders the bot's ```chart``` JSON (bar/comparison) to a PNG -
-                         shared by server.py's /api/chart and tests/chat_audit.py
+  graphs/               graph.py builds the main graph: supervisor -> Send(run_category) x N
+                        -> personality; weekly_recap_graph.py and matchup_preview_graph.py
+                        are the other two LangGraph entry points
+  logging/              trace.py's emit() event hook nodes call instead of print(), for a
+                        consistent, greppable log shape
   tools/                One module per category (fantasy_*, nfl_*), each exporting TOOLS;
                          tools/__init__.py wires them into CATEGORY_REGISTRY
   clients/              espn_fantasy_client.py (private league auth + League cache) and
                         espn_nfl_client.py (public NFL data API, no auth)
+  utils/                chart_render.py renders the bot's ```chart``` JSON (bar/comparison)
+                        to a PNG - shared by server.py's /api/chart and tests/chat_audit.py;
+                        image_gen.py / openai_image_gen.py generate recap/preview poster images
   server.py            FastAPI server - the whole surface Discord talks to:
-                        /api/chat, /api/chart (chart JSON -> PNG) - plain
-                        JSON in, JSON/PNG out, no streaming
+                        /api/chat, /api/chart (chart JSON -> PNG), /api/weekly-recap,
+                        /api/matchup-preview - plain JSON in/out (the two recap/preview
+                        endpoints embed their poster PNG as base64 in the JSON, or
+                        null if image generation failed), no streaming
 docs/                Consolidated reference docs (see below)
 ```
 
@@ -46,11 +54,14 @@ python3 -m venv venv && venv/bin/pip install -r requirements.txt
 `.env` (gitignored) needs:
 ```
 GOOGLE_API_KEY=AIza...
+OPENAI_API_KEY=sk-...                 # poster/scoreboard image generation for recap + preview
 ESPN_S2=...                           # from your browser's espn.com cookies, private league auth
 SWID=...                              # same
 ```
-`fantasy_agent/clients/espn_fantasy_client.py` hardcodes `LEAGUE_ID` and `YEAR` for the
-private league - update those two constants there if either changes.
+`league_id` is passed per-request (in the `/api/chat`, `/api/weekly-recap`, and
+`/api/matchup-preview` bodies), not hardcoded. `fantasy_agent/clients/espn_fantasy_client.py`
+hardcodes `YEAR` for the private league - update that constant there once the season rolls
+over.
 
 ## Running it
 
@@ -83,3 +94,32 @@ synthesizes once. That bounds it structurally - fixed fan-out, capped tool
 rounds, single synthesis step - so it can't infinite-loop, at the cost of
 not being able to request more data mid-reply if the initial classification
 missed something. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
+
+### Weekly recap and matchup preview
+
+Two more LangGraph entry points, both linear (no supervisor/fan-out): a
+Gemini call writes the text, then an image-generation call renders a
+poster-style PNG:
+
+```
+weekly_recap_graph:     get_matchups -> league_summary -> power_ranking_image -> END
+matchup_preview_graph:  get_matchup_data -> flag_lineup_changes -> matchup_preview -> matchup_image -> END
+```
+
+- **weekly_recap_graph** pulls the given week's box scores + standings and
+  has one LLM call write a league summary and a full power-ranking list with
+  an award-style tag per team, then generates a recap poster graphic from
+  those rankings. Served at `/api/weekly-recap`; `scripts/run_weekly_recap.py`
+  can also trigger it directly from the command line, no server needed.
+- **matchup_preview_graph** pulls the upcoming week's projected matchups,
+  flags any starter who scored zero last week (benched/dropped/still
+  started, plus injury status), then has one LLM call write a look-ahead
+  summary before generating a scoreboard-style preview graphic. Served at
+  `/api/matchup-preview`.
+
+Both image calls go through `fantasy_agent/utils/openai_image_gen.py`
+(`generate_image`, backed by `OPENAI_API_KEY`) - `image_gen.py` is the same
+shape backed by Gemini's image model instead, kept for quality comparisons
+but not currently wired into either graph. Either call can fail
+independently of the text generation; the server returns the JSON payload
+with the image field `null` rather than erroring the whole request.

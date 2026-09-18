@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
-from fantasy_agent.weekly_recap_graph import build_weekly_recap_graph
+from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.clients.espn_fantasy_client import current_league_id
 
 
@@ -35,7 +35,6 @@ def main():
     print("\n=== Power Rankings ===\n")
     for i, r in enumerate(result["power_rankings"], start=1):
         print(f"#{i} {r['tag']} — {r['team']}")
-        print(f"    {r['blurb']}")
 
 
 if __name__ == "__main__":
