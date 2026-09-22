@@ -8,6 +8,9 @@ Run: uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port
 image generation failed - see weekly_recap_graph.py's power_ranking_image_node.
 /api/matchup-preview's matchup_image_base64 is base64 PNG, or null if
 image generation failed - see matchup_preview_graph.py's matchup_image_node.
+/api/injury-check returns NFL-wide alerts for fantasy-relevant players who
+crossed the Active <-> Out/Injured-Reserve line since the last check - see
+injury_tracking.py.
 """
 import asyncio
 import base64
@@ -31,6 +34,7 @@ from fantasy_agent.graphs.graph import build_graph
 from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
 from fantasy_agent.clients.espn_fantasy_client import current_league_id
+from fantasy_agent.injury_tracking import check_injuries
 
 app = FastAPI()
 graph = build_graph()
@@ -117,3 +121,17 @@ async def matchup_preview(req: MatchupPreviewRequest):
             base64.b64encode(image_bytes).decode("ascii") if image_bytes else None
         ),
     }
+
+
+class InjuryCheckRequest(BaseModel):
+    league_id: int
+
+
+@app.post("/api/injury-check")
+async def injury_check(req: InjuryCheckRequest):
+    current_league_id.set(req.league_id)
+    try:
+        alerts = await asyncio.to_thread(check_injuries)
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+    return {"alerts": alerts}

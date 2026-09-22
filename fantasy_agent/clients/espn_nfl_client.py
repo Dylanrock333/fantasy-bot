@@ -7,6 +7,8 @@ No API key, espn_s2, or SWID required — contrast with
 fantasy_agent/clients/espn_fantasy_client.py, which authenticates against
 your private fantasy league.
 """
+import re
+
 import requests
 from rapidfuzz import fuzz, process
 
@@ -17,6 +19,11 @@ ATHLETE_API = "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl"
 CDN_API = "https://cdn.espn.com/core/nfl"
 
 TIMEOUT = 10
+
+# Standard offensive skill positions + kicker a fantasy roster can actually
+# use (excludes defense/O-line/long-snapper). Team defense (D/ST) isn't an
+# individual athlete position and isn't included here.
+FANTASY_POSITIONS = {"QB", "RB", "WR", "TE", "PK"}
 
 
 def get_json(url: str, **params) -> dict:
@@ -64,6 +71,21 @@ def resolve_team(query: str) -> dict | None:
 _roster_cache: dict[str, list[dict]] = {}
 
 
+def flatten_roster_groups(roster_json: dict, groups: set[str] | None = None) -> list[dict]:
+    """Flatten ESPN's team-roster response (grouped by position: offense/
+    defense/specialTeam/injuredReserveOrOut/practiceSquad/suspended) into a
+    single list of athlete dicts. groups=None (default) flattens every
+    group - matches the historical inline behavior this replaces in
+    resolve_athlete(). Pass an explicit set to scope to only certain
+    groups (e.g. excluding practiceSquad/suspended)."""
+    return [
+        p
+        for group in roster_json.get("athletes", [])
+        if groups is None or group.get("position") in groups
+        for p in group["items"]
+    ]
+
+
 def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
     """Look up a real-NFL athlete's public-API id by team + name (substring
     match, falling back to fuzzy matching for typos), e.g. pro_team='DAL',
@@ -78,9 +100,7 @@ def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
     team_id = team["id"]
     if team_id not in _roster_cache:
         roster = get_json(f"{SITE_API}/teams/{team_id}/roster")
-        _roster_cache[team_id] = [
-            p for group in roster.get("athletes", []) for p in group["items"]
-        ]
+        _roster_cache[team_id] = flatten_roster_groups(roster)
 
     q = player_name.strip().lower()
     for p in _roster_cache[team_id]:
@@ -89,6 +109,30 @@ def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
     names = [p["fullName"].lower() for p in _roster_cache[team_id]]
     match = process.extractOne(q, names, scorer=fuzz.WRatio, score_cutoff=80)
     return _roster_cache[team_id][match[2]] if match else None
+
+
+def extract_athlete_id(links: list[dict]) -> int | None:
+    """Extract ESPN's shared numeric athlete id from the injuries feed's
+    athlete.links[] - no plain `id` field exists on that endpoint's
+    athlete object (confirmed live). Scans links[], not headshot.href,
+    since headshot is sometimes None while links[] is always populated."""
+    for link in links:
+        match = re.search(r"/id/(\d+)", link.get("href", ""))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def best_link(articles: list[dict]) -> str | None:
+    """Pick a link Discord can actually embed: ESPN's /video/clip/ pages
+    carry no Open Graph tags (no title/image), so prefer the first /story/
+    article link and only fall back to whatever's first otherwise."""
+    links = [a.get("links", {}).get("web", {}).get("href") for a in articles]
+    links = [href for href in links if href]
+    for href in links:
+        if "/story/" in href:
+            return href
+    return links[0] if links else None
 
 
 def resolve_event(pro_team: str, week: int = 0) -> str | None:

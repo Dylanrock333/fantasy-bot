@@ -2,19 +2,7 @@
 (ESPN's public API)."""
 from langchain_core.tools import tool
 
-from ..clients.espn_nfl_client import ATHLETE_API, SITE_API, get_json, resolve_athlete
-
-
-def _best_link(articles: list[dict]) -> str | None:
-    """Pick a link Discord can actually embed: ESPN's /video/clip/ pages
-    carry no Open Graph tags (no title/image), so prefer the first /story/
-    article link and only fall back to whatever's first otherwise."""
-    links = [a.get("links", {}).get("web", {}).get("href") for a in articles]
-    links = [href for href in links if href]
-    for href in links:
-        if "/story/" in href:
-            return href
-    return links[0] if links else None
+from ..clients.espn_nfl_client import ATHLETE_API, SITE_API, best_link, get_json, resolve_athlete
 
 
 @tool
@@ -28,7 +16,7 @@ def get_nfl_news(limit: int = 5) -> str:
         f"{a['headline']}: {a.get('description', '')}".strip(": ")
         for a in articles
     ]
-    top_link = _best_link(articles)
+    top_link = best_link(articles)
     text = "\n".join(lines)
     if top_link:
         text += f"\n\n{top_link}"
@@ -90,7 +78,7 @@ def get_player_news(player_name: str, pro_team: str, limit: int = 3) -> str:
         f"{a['headline']}: {a.get('description', '')}".strip(": ")
         for a in articles
     ]
-    top_link = _best_link(articles)
+    top_link = best_link(articles)
     text = f"News for {athlete['fullName']}:\n" + "\n".join(lines)
     if top_link:
         text += f"\n\n{top_link}"

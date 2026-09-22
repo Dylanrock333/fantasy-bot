@@ -6,6 +6,7 @@ venv/
 .beads/
 skills-lock.json
 tests/audit_output/
+fantasy_agent/data/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
