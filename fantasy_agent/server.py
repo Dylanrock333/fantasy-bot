@@ -30,6 +30,7 @@ from fantasy_agent.utils.chart_render import render_chart_png
 from fantasy_agent.graphs.graph import build_graph
 from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
+from fantasy_agent.tools.fantasy_player_tools import get_player_leaderboard
 from fantasy_agent.clients.espn_fantasy_client import current_league_id
 
 app = FastAPI()
@@ -117,3 +118,21 @@ async def matchup_preview(req: MatchupPreviewRequest):
             base64.b64encode(image_bytes).decode("ascii") if image_bytes else None
         ),
     }
+
+
+class LeaderboardRequest(BaseModel):
+    league_id: int
+    position: str
+    size: int = 15
+    sort_by: str = "points"
+
+
+@app.post("/api/leaderboard")
+async def leaderboard(req: LeaderboardRequest):
+    current_league_id.set(req.league_id)
+    try:
+        players = await asyncio.to_thread(get_player_leaderboard, req.position, req.size, req.sort_by)
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+
+    return {"position": req.position, "players": players}

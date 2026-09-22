@@ -36,3 +36,47 @@ def get_player_info(name: str) -> str:
 
 
 TOOLS = [get_free_agents, get_player_info]
+
+
+SORT_KEYS = {
+    "points": lambda p: p.total_points,
+    "avg_points": lambda p: p.avg_points,
+    "projected_points": lambda p: p.projected_total_points,
+    "percent_owned": lambda p: p.percent_owned,
+}
+
+
+def get_player_leaderboard(position: str, size: int = 15, sort_by: str = "points") -> list[dict]:
+    """Return the top `size` fantasy players at `position` (e.g. 'QB', 'RB',
+    'WR', 'TE', 'D/ST', 'K') ranked by `sort_by` (one of SORT_KEYS above,
+    defaulting to season total points), across both rostered and
+    free-agent players. `owner_team_name` is None for players nobody in the
+    league owns. Plain data helper for the REST API - not registered as an
+    LLM tool."""
+    league = league_singleton()
+    position = position.upper()
+    sort_key = SORT_KEYS.get(sort_by, SORT_KEYS["points"])
+
+    rostered = [
+        (player, team.team_name)
+        for team in league.teams
+        for player in team.roster
+        if player.position == position
+    ]
+    free_agents = [(player, None) for player in league.free_agents(size=1000, position=position)]
+
+    ranked = sorted(rostered + free_agents, key=lambda pair: sort_key(pair[0]), reverse=True)[:size]
+
+    return [
+        {
+            "rank": i + 1,
+            "name": player.name,
+            "pro_team": player.proTeam,
+            "total_points": player.total_points,
+            "avg_points": player.avg_points,
+            "projected_total_points": player.projected_total_points,
+            "percent_owned": player.percent_owned,
+            "owner_team_name": owner_team_name,
+        }
+        for i, (player, owner_team_name) in enumerate(ranked)
+    ]
