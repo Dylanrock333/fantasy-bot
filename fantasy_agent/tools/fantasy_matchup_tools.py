@@ -2,7 +2,7 @@
 league via clients/espn_fantasy_client.py, not real-NFL games)."""
 from langchain_core.tools import tool
 
-from ..clients.espn_fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton, nfl_game_week
 
 
 @tool
@@ -10,7 +10,7 @@ def get_matchup_scoreboard(week: int = 0) -> str:
     """Get this fantasy league's matchup scores for a given week (defaults
     to the current week)."""
     league = league_singleton()
-    week = week or league.current_week or 1
+    week = week or nfl_game_week()
     matchups = league.scoreboard(week=week)
     if not matchups:
         return f"No matchups found for week {week}."
@@ -25,7 +25,7 @@ def get_box_scores(week: int = 0) -> str:
     including both teams' complete starting lineups (plus bench/IR) with
     each player's scored and projected points."""
     league = league_singleton()
-    week = week or league.current_week or 1
+    week = week or nfl_game_week()
     try:
         box_scores = league.box_scores(week=week)
     except KeyError:

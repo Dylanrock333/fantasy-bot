@@ -17,7 +17,7 @@ from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
-from fantasy_agent.clients.espn_fantasy_client import league_singleton
+from fantasy_agent.clients.espn_fantasy_client import league_singleton, nfl_game_week
 from fantasy_agent.graphs.graph import invoke_llm, MODEL
 from fantasy_agent.logging.trace import emit
 from fantasy_agent.utils.openai_image_gen import generate_image
@@ -32,9 +32,7 @@ class WeeklyRecapState(TypedDict):
 
 
 def get_matchups_node(state: WeeklyRecapState):
-    # TEMP: hardcoded to week 1 since week 2 hasn't had any games yet -
-    # revert to `state["week"] or league.current_week or 1` once it has.
-    week = 1
+    week = state.get("week") or nfl_game_week()
     league = league_singleton()
     box_scores = league.box_scores(week=week)
 

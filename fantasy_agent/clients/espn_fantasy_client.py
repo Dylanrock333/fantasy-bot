@@ -4,6 +4,8 @@ object, cached per league_id.
 import os
 import time
 from contextvars import ContextVar
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from espn_api.football import League
@@ -13,6 +15,8 @@ from fantasy_agent.logging.trace import emit
 load_dotenv()
 
 YEAR = 2026
+# Thursday of NFL week 1 - update alongside YEAR each season.
+SEASON_KICKOFF = date(2026, 9, 10)
 TTL_SECONDS = 30 * 60 #Every well
 
 # Set once per request (in fantasy_agent/server.py) so tool calls deep in the graph
@@ -40,3 +44,16 @@ def league_singleton() -> League:
         cached = (get_league(league_id), time.time())
         _leagues[league_id] = cached
     return cached[0]
+
+
+def nfl_game_week() -> int:
+    """The NFL week whose games are live or most recently finished. A week
+    runs Thursday through Monday Night Football and rolls over at Wednesday
+    00:00 ET, so late Monday night and all of Tuesday still return MNF's
+    week. ESPN's current_week can't be used for this - it jumps to the
+    upcoming week right after MNF."""
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    # Days since the Wednesday before kickoff, so each week starts on a Wednesday.
+    days = (today - SEASON_KICKOFF).days + 1
+    week = days // 7 + 1
+    return max(1, min(week, league_singleton().finalScoringPeriod))
