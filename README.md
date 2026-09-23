@@ -123,3 +123,36 @@ shape backed by Gemini's image model instead, kept for quality comparisons
 but not currently wired into either graph. Either call can fail
 independently of the text generation; the server returns the JSON payload
 with the image field `null` rather than erroring the whole request.
+
+## Roadmap / infra TODOs
+
+Cross-cutting ops work spanning this repo and the
+[Discord bot](https://github.com/Dylanrock333/the-fantasy-zone-discord).
+Tracked here (and mirrored in the Discord repo's README) until there's a
+shared issue tracker.
+
+1. **Per-user private channels** - let a member get a private channel/thread
+   with the bot (strategy chat, personal stats) that other league members
+   can't read. Discord-side feature (permission overwrites or private
+   threads); this API is stateless per-request so it just needs the caller
+   to pass through a user-scoped channel id, no server change expected.
+2. **Prod vs. test deployments** - split into a prod deployment (the real
+   league list) and a test deployment (a small set of leagues Dylan
+   controls) so new features/changes land in test first. Needs each
+   deployment to run its own bot process + API instance with its own env
+   vars/league config; this API is already stateless so running two copies
+   should be cheap.
+3. **Zero-downtime prod updates** - deploy changes to prod without a hard
+   restart/reset that drops in-flight commands or scheduled jobs. Likely a
+   process-manager or rolling-deploy concern more than an app-code concern.
+4. **Consolidate commands/commish tools** - unify admin (commissioner-only)
+   commands and any "reset the server" style operations behind one
+   consistent surface instead of ad hoc scripts/commands.
+5. **(Bonus) One-click server duplication** - an endpoint that spins up a
+   duplicate Discord server from a name + league id and returns a commish
+   invite link. First joiner claims commish (1 per league, needs a
+   succession/hierarchy plan for if they leave); team names get pulled in
+   automatically; each subsequent joiner picks a team that then sticks to
+   their Discord user id (admin-resettable) so the bot knows whose team is
+   asking by default. This is the biggest lift of the five - needs a
+   user/team/league identity model that doesn't exist yet on either side.
