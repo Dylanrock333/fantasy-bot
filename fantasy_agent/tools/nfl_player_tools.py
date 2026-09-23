@@ -82,6 +82,7 @@ def get_nfl_player_gamelog(player_name: str, pro_team: str, num_games: int = 5) 
     season_types = data.get("seasonTypes", [])
     events_map = data.get("events", {})
     display_names = data.get("displayNames", [])
+    # Flatten per-game stat rows across every season type and category.
     game_entries = []
     for st in season_types:
         for cat in st.get("categories", []):
@@ -183,6 +184,7 @@ def get_nfl_qbr_leaders(week: int = 0) -> str:
     if not items:
         return f"No QBR data available for {scope} ({year}) yet."
 
+    # Rank by QBR value, then resolve only the top 10 athlete refs (one request each).
     ranked = []
     for item in items:
         stats = {s["name"]: s for cat in item["splits"]["categories"] for s in cat["stats"]}

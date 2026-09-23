@@ -1,19 +1,13 @@
-"""API server for fantasy_agent - the Discord bot is its only client.
+"""FastAPI server exposing the agent graphs to the Discord bot (its only client).
 
 Run: uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port 8787
-
-/api/chat runs the graph and returns the reply as plain JSON.
-/api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.
-/api/weekly-recap's power_ranking_image_base64 is base64 PNG, or null if
-image generation failed - see weekly_recap_graph.py's power_ranking_image_node.
-/api/matchup-preview's matchup_image_base64 is base64 PNG, or null if
-image generation failed - see matchup_preview_graph.py's matchup_image_node.
 """
 import asyncio
 import base64
 import sys
 from pathlib import Path
 
+# Make the repo root importable and load .env before importing project modules.
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -33,6 +27,7 @@ from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_gra
 from fantasy_agent.tools.fantasy_player_tools import get_player_leaderboard
 from fantasy_agent.clients.espn_fantasy_client import current_league_id
 
+# Graphs are compiled once at import time and shared across requests.
 app = FastAPI()
 graph = build_graph()
 weekly_recap_graph = build_weekly_recap_graph()
@@ -43,14 +38,14 @@ class ChatRequest(BaseModel):
     league_id: int
 
 
+# Run the chat graph and return the final reply text.
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     messages = [HumanMessage(content=req.message)]
     current_league_id.set(req.league_id)
 
     try:
-        # asyncio.to_thread propagates the current contextvars context
-        # (including current_league_id) into the executor thread.
+        # to_thread copies contextvars, so current_league_id reaches the worker thread.
         result = await asyncio.to_thread(graph.invoke, {"messages": messages})
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
@@ -58,6 +53,7 @@ async def chat(req: ChatRequest):
     return {"reply": result["messages"][-1].text}
 
 
+# Render a `bar`/`comparison` chart JSON payload to PNG.
 @app.post("/api/chart")
 async def chart(req: dict):
     png_bytes = await asyncio.to_thread(render_chart_png, req)
@@ -71,6 +67,7 @@ class WeeklyRecapRequest(BaseModel):
     week: int = 0
 
 
+# Weekly recap; the power-ranking image is base64 PNG or null if generation failed.
 @app.post("/api/weekly-recap")
 async def weekly_recap(req: WeeklyRecapRequest):
     current_league_id.set(req.league_id)
@@ -98,6 +95,7 @@ class MatchupPreviewRequest(BaseModel):
     previous_recap_context: str | None = None
 
 
+# Matchup preview; the matchup image is base64 PNG or null if generation failed.
 @app.post("/api/matchup-preview")
 async def matchup_preview(req: MatchupPreviewRequest):
     current_league_id.set(req.league_id)
@@ -127,6 +125,7 @@ class LeaderboardRequest(BaseModel):
     sort_by: str = "points"
 
 
+# Fantasy player leaderboard for a position, sorted by the requested stat.
 @app.post("/api/leaderboard")
 async def leaderboard(req: LeaderboardRequest):
     current_league_id.set(req.league_id)

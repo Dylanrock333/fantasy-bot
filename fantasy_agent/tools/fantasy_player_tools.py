@@ -38,6 +38,7 @@ def get_player_info(name: str) -> str:
 TOOLS = [get_free_agents, get_player_info]
 
 
+# Leaderboard sort options, keyed by the API's sort_by value.
 SORT_KEYS = {
     "points": lambda p: p.total_points,
     "avg_points": lambda p: p.avg_points,
@@ -47,12 +48,9 @@ SORT_KEYS = {
 
 
 def get_player_leaderboard(position: str, size: int = 15, sort_by: str = "points") -> list[dict]:
-    """Return the top `size` fantasy players at `position` (e.g. 'QB', 'RB',
-    'WR', 'TE', 'D/ST', 'K') ranked by `sort_by` (one of SORT_KEYS above,
-    defaulting to season total points), across both rostered and
-    free-agent players. `owner_team_name` is None for players nobody in the
-    league owns. Plain data helper for the REST API - not registered as an
-    LLM tool."""
+    """Rank rostered + free-agent players at a position for the REST API (not an LLM tool).
+
+    Unknown sort_by falls back to points; owner_team_name is None for free agents."""
     league = league_singleton()
     position = position.upper()
     sort_key = SORT_KEYS.get(sort_by, SORT_KEYS["points"])

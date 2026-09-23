@@ -15,6 +15,7 @@ def get_team_roster(team_name: str) -> str:
     be a partial match, e.g. 'Cowboys' or part of the manager's team name,
     and typos are tolerated via fuzzy matching."""
     league = league_singleton()
+    # Substring match first, then fall back to fuzzy matching on team names.
     q = team_name.strip().lower()
     team = next((t for t in league.teams if q in t.team_name.lower()), None)
     if team is None:

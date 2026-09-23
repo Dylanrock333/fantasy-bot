@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 
+# Make the repo root importable and load .env before importing project modules.
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -20,6 +21,7 @@ from fantasy_agent.clients.espn_fantasy_client import current_league_id
 
 
 def main():
+    """Run the recap graph for one league/week and print the summary and rankings."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--league-id", type=int, required=True)
     parser.add_argument("--week", type=int, default=0)

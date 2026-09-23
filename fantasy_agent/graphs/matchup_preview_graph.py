@@ -1,14 +1,6 @@
-"""Matchup preview LangGraph flow: pull the upcoming week's projected
-matchups + standings, flag any team that benched or dropped a starter who
-scored zero last week (skipping byes), one LLM call writes a look-ahead
-league summary with one joke beat per matchup, then a Nano Banana image
-call turns the projections into a clean scoreboard-style graphic.
+"""Matchup preview graph: projected matchups + lineup-change flags -> LLM preview -> scoreboard image.
 
   START -> get_matchup_data -> flag_lineup_changes -> matchup_preview -> matchup_image -> END
-
-Standalone from graph.py's chat agent and from weekly_recap_graph.py -
-this looks forward at projections instead of back at results, but mirrors
-weekly_recap_graph.py's shape.
 """
 import time
 from typing import List, Optional, TypedDict
@@ -23,9 +15,11 @@ from fantasy_agent.graphs.graph import invoke_llm, MODEL
 from fantasy_agent.logging.trace import emit
 from fantasy_agent.utils.openai_image_gen import generate_image
 
+# Lineup slots that do not count as starting.
 BENCH_SLOTS = ("BE", "IR")
 
 
+# State carried through the preview graph.
 class MatchupPreviewState(TypedDict):
     week: int
     previous_recap_context: Optional[str]
@@ -36,6 +30,7 @@ class MatchupPreviewState(TypedDict):
 
 
 def get_matchup_data_node(state: MatchupPreviewState):
+    """Collect each matchup's projections, records, projected winner and margin."""
     league = league_singleton()
     week = state.get("week") or league.current_week
     box_scores = league.box_scores(week=week)
@@ -59,6 +54,7 @@ def get_matchup_data_node(state: MatchupPreviewState):
 
 
 def flag_lineup_changes_node(state: MatchupPreviewState):
+    """Flag last week's zero-point starters (non-bye) and whether they were benched or dropped."""
     week = state["week"]
     last_week = week - 1
     if last_week < 1:
@@ -68,6 +64,7 @@ def flag_lineup_changes_node(state: MatchupPreviewState):
     last_box_scores = league.box_scores(week=last_week)
     this_box_scores = league.box_scores(week=week)
 
+    # Starters who scored zero last week, by team.
     duds_by_team: dict[str, list] = {}
     for b in last_box_scores:
         for team, lineup in ((b.home_team, b.home_lineup), (b.away_team, b.away_lineup)):
@@ -80,6 +77,7 @@ def flag_lineup_changes_node(state: MatchupPreviewState):
             if duds:
                 duds_by_team.setdefault(str(team), []).extend(duds)
 
+    # This week's full roster and starters, by team.
     roster_by_team, starting_by_team = {}, {}
     for b in this_box_scores:
         for team, lineup in ((b.home_team, b.home_lineup), (b.away_team, b.away_lineup)):
@@ -108,6 +106,7 @@ def flag_lineup_changes_node(state: MatchupPreviewState):
     return {"lineup_flags": flags}
 
 
+# Structured LLM output for the preview (field description is sent to the LLM).
 class MatchupPreviewOutput(BaseModel):
     league_preview: str = Field(
         description="A look ahead to this week, with one beat per matchup "
@@ -129,6 +128,7 @@ class MatchupPreviewOutput(BaseModel):
 
 
 def matchup_preview_node(state: MatchupPreviewState):
+    """Write one joke beat per matchup, optionally calling back to last week's recap."""
     emit("node_start", node="matchup_preview")
     t0 = time.monotonic()
 
@@ -184,6 +184,7 @@ def matchup_preview_node(state: MatchupPreviewState):
 
 
 def matchup_image_node(state: MatchupPreviewState):
+    """Generate the scoreboard graphic; leaves the image as None if generation fails."""
     emit("node_start", node="matchup_image")
     t0 = time.monotonic()
 
@@ -239,6 +240,7 @@ def matchup_image_node(state: MatchupPreviewState):
 
 
 def build_matchup_preview_graph():
+    """Wire and compile the linear matchup preview graph."""
     graph = StateGraph(MatchupPreviewState)
     graph.add_node("get_matchup_data", get_matchup_data_node)
     graph.add_node("flag_lineup_changes", flag_lineup_changes_node)

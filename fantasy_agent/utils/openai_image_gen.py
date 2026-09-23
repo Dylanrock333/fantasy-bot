@@ -1,7 +1,4 @@
-"""Text-to-image generation via OpenAI's image model (GPT Image), for
-comparing output quality against fantasy_agent/utils/image_gen.py's Gemini
-client. Same generate_image(prompt) -> bytes shape, different provider.
-"""
+"""Text-to-image generation via OpenAI's GPT Image model (used by the recap and preview graphs)."""
 import base64
 import os
 from typing import Optional
@@ -13,13 +10,11 @@ IMAGE_MODEL = os.environ.get("FANTASY_AGENT_OPENAI_IMAGE_MODEL", "gpt-image-2")
 API_KEY = os.environ.get("OPENAI_API_KEY")
 
 # size: "1024x1024", "1536x1024" (landscape), "1024x1536" (portrait), or "auto".
-# quality: "low", "medium", "high", "xhigh", "max", or "auto" - higher is
-# sharper/more detailed at steeply higher token cost (see the cost writeup).
+# quality: "low" .. "max" or "auto"; higher costs steeply more tokens.
 
 
 def generate_image(prompt: str, size: Optional[str] = None, quality: Optional[str] = None) -> bytes:
-    """Returns image bytes for `prompt`. Raises if the call fails or the
-    response contains no image data."""
+    """Return image bytes for `prompt`; raises if no image data comes back."""
     client = OpenAI(api_key=API_KEY)
     response = client.images.generate(
         model=IMAGE_MODEL, prompt=prompt, size=size or "auto", quality=quality or "high"

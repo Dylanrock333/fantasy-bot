@@ -57,6 +57,7 @@ def get_team_stats(team_name: str) -> str:
     if not categories:
         return f"No statistics available for {team['displayName']}."
 
+    # Look up one stat's display value within a category, or None if absent.
     def stat(cat_name: str, stat_name: str) -> str | None:
         for s in categories.get(cat_name, {}).get("stats", []):
             if s["name"] == stat_name:

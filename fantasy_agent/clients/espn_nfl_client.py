@@ -1,11 +1,6 @@
-"""Shared HTTP helper for ESPN's public (unauthenticated) NFL data API.
+"""HTTP helpers and team/athlete/game lookups for ESPN's public, unauthenticated NFL API.
 
-See docs/NFL_PUBLIC_API.md for the full endpoint reference this wraps.
-
-Source: https://github.com/pseudo-r/Public-ESPN-API/blob/main/docs/sports/football.md
-No API key, espn_s2, or SWID required — contrast with
-fantasy_agent/clients/espn_fantasy_client.py, which authenticates against
-your private fantasy league.
+Endpoint reference: docs/NFL_PUBLIC_API.md
 """
 import requests
 from rapidfuzz import fuzz, process
@@ -20,26 +15,23 @@ TIMEOUT = 10
 
 
 def get_json(url: str, **params) -> dict:
-    """GET a URL and return the parsed JSON body. Raises on non-2xx."""
+    """GET a URL and return its JSON body; raises on non-2xx."""
     resp = requests.get(url, params=params, timeout=TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
 
 def follow_ref(ref: dict) -> dict:
-    """Core API list endpoints return {'$ref': url} stubs instead of full
-    objects. Resolve one by re-fetching its $ref."""
+    """Resolve a Core API {'$ref': url} stub into the full object."""
     return get_json(ref["$ref"])
 
 
+# All 32 teams, fetched once per process.
 _team_cache: list[dict] | None = None
 
 
 def resolve_team(query: str) -> dict | None:
-    """Look up a team by name/city/abbreviation (case-insensitive substring
-    match, falling back to fuzzy matching for typos), e.g. 'cowboys', 'DAL',
-    'dallas', or a misspelling like 'dalas'. Caches the team list for the
-    process lifetime since it's static within a season (32 teams total)."""
+    """Find a team by abbreviation, then name substring, then fuzzy match (e.g. 'DAL', 'cowboys', 'dalas')."""
     global _team_cache
     if _team_cache is None:
         teams = get_json(f"{SITE_API}/teams")
@@ -57,20 +49,14 @@ def resolve_team(query: str) -> dict | None:
     return _team_cache[match[2]] if match else None
 
 
-# Per-team roster cache, populated lazily (only for teams actually looked
-# up) rather than prefetching the full ~1700-athlete player pool. Fantasy
-# roster tools already return each player's proTeam, so resolving one
-# player only ever requires fetching that one team's ~53-man roster.
+# Lazily cached rosters for teams actually looked up, instead of prefetching every athlete.
 _roster_cache: dict[str, list[dict]] = {}
 
 
 def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
-    """Look up a real-NFL athlete's public-API id by team + name (substring
-    match, falling back to fuzzy matching for typos), e.g. pro_team='DAL',
-    player_name='Dak Prescott' or a misspelling like 'Dak Prescot'. The
-    public athlete id is a different id space than the fantasy playerId
-    from espn_api - this is the only reliable way to bridge the two
-    without a full player cache."""
+    """Find a public-API athlete on a team's roster by name (substring, then fuzzy match).
+
+    Bridges fantasy players to public athlete ids, which use a different id space."""
     team = resolve_team(pro_team)
     if team is None:
         return None
@@ -92,9 +78,7 @@ def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
 
 
 def resolve_event(pro_team: str, week: int = 0) -> str | None:
-    """Look up a real-NFL game id for one team's game in a given week
-    (defaults to current week). Not cached - scores/status change live
-    during a game, unlike the mostly-static team/roster lookups above."""
+    """Find a team's game id for a week (default current) from the live, uncached scoreboard."""
     team = resolve_team(pro_team)
     if team is None:
         return None

@@ -1,8 +1,4 @@
-"""Renders the bot's ```chart``` JSON payload (`bar`/`comparison` shapes) to
-a PNG. Shared by fantasy_agent/server.py's /api/chart (returns the bytes straight to
-the Discord bot) and tests/chat_audit.py (writes the bytes to a report
-file) so the chart schema is defined in exactly one place.
-"""
+"""Render the bot's ```chart``` JSON (`bar`/`comparison`) to PNG; shared by /api/chart and chat_audit."""
 import io
 from typing import Optional
 
@@ -12,9 +8,10 @@ import matplotlib.pyplot as plt
 
 
 def render_chart_png(chart: dict) -> Optional[bytes]:
-    """Returns PNG bytes, or None for an unrecognized chart shape."""
+    """Return PNG bytes, or None for an unrecognized chart shape."""
     fig = None
 
+    # Grouped bar chart: all series share one y-axis.
     if chart.get("type") == "bar" and chart.get("categories"):
         categories = chart["categories"]
         series = chart.get("series") or []
@@ -31,6 +28,7 @@ def render_chart_png(chart: dict) -> Optional[bytes]:
         if len(series) > 1:
             ax.legend()
 
+    # Comparison: one small subplot per metric so each is scaled independently.
     elif chart.get("type") == "comparison" and chart.get("rows"):
         rows = chart["rows"]
         names = [str(s) for s in chart.get("series") or []]

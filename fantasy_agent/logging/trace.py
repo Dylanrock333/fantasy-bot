@@ -1,10 +1,7 @@
-"""Structured event logging for graph.py's nodes.
-
-Every node/tool-call in graph.py calls emit(event_type, **data) instead of
-print(), so trace output has a consistent, greppable shape.
-"""
+"""Greppable structured trace logging for graph nodes and tool calls."""
 from typing import Any
 
 
 def emit(event_type: str, **data: Any) -> None:
+    """Print one `[trace] <event> {data}` line."""
     print(f"[trace] {event_type} {data}")

@@ -1,16 +1,11 @@
-"""Category -> tool-list registry consumed by graph.py's supervisor/category
-nodes. Add a new category by adding a module here (with a TOOLS list) and
-registering it below - no graph changes needed.
+"""Category -> tool-list registry for the chat graph ("fantasy_*" = private league, "nfl_*" = real NFL).
 
-Category names are prefixed to keep the two data sources unambiguous to the
-supervisor LLM: "fantasy_*" = your private league (via clients/espn_fantasy_client.py),
-"nfl_*" = real-world NFL data (ESPN's public API, see docs/NFL_PUBLIC_API.md).
+Add a category by adding a module with a TOOLS list and registering it in _MODULES.
 """
 import sys
 from pathlib import Path
 
-# Let this package be imported regardless of the process's cwd, since
-# fantasy_agent isn't an installed package.
+# fantasy_agent isn't installed, so make the repo root importable from any cwd.
 ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -43,7 +38,6 @@ _MODULES = {
 
 CATEGORY_REGISTRY = {name: mod.TOOLS for name, mod in _MODULES.items()}
 
-# Each module's docstring is its category description - the supervisor reads
-# these to tell similarly-named categories apart (e.g. nfl_scores vs
-# nfl_game), so keep each module's docstring a clear one-liner on its scope.
+# Each tool module's docstring is sent to the supervisor as its category description,
+# so keep those docstrings accurate - they are functional, not just documentation.
 CATEGORY_DESCRIPTIONS = {name: mod.__doc__.strip() for name, mod in _MODULES.items()}

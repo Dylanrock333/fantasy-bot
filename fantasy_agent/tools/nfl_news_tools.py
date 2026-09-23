@@ -6,9 +6,7 @@ from ..clients.espn_nfl_client import ATHLETE_API, SITE_API, get_json, resolve_a
 
 
 def _best_link(articles: list[dict]) -> str | None:
-    """Pick a link Discord can actually embed: ESPN's /video/clip/ pages
-    carry no Open Graph tags (no title/image), so prefer the first /story/
-    article link and only fall back to whatever's first otherwise."""
+    """Pick the first /story/ link (Discord can embed it; ESPN video pages lack OG tags), else the first link."""
     links = [a.get("links", {}).get("web", {}).get("href") for a in articles]
     links = [href for href in links if href]
     for href in links:

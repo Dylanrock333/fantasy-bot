@@ -1,13 +1,6 @@
-"""Weekly recap LangGraph flow: pull the week's box scores + standings, one
-LLM call writes a league-wide summary paragraph plus a ranked list of every
-team with an award-style tag, then a Nano Banana image call turns those
-rankings + this week's matchups into a poster-style recap graphic.
+"""Weekly recap graph: box scores + standings -> LLM summary and power rankings -> poster image.
 
   START -> get_matchups -> league_summary -> power_ranking_image -> END
-
-Standalone from graph.py's chat agent - this doesn't classify a user message
-or call tools mid-conversation, it pulls box scores/standings directly and
-writes straight to an LLM.
 """
 import time
 from typing import List, Optional, TypedDict
@@ -23,6 +16,7 @@ from fantasy_agent.logging.trace import emit
 from fantasy_agent.utils.openai_image_gen import generate_image
 
 
+# State carried through the recap graph.
 class WeeklyRecapState(TypedDict):
     week: int
     matchups: List[dict]
@@ -32,6 +26,7 @@ class WeeklyRecapState(TypedDict):
 
 
 def get_matchups_node(state: WeeklyRecapState):
+    """Fetch the week's final scores (defaults to the current NFL week)."""
     week = state.get("week") or nfl_game_week()
     league = league_singleton()
     box_scores = league.box_scores(week=week)
@@ -48,6 +43,7 @@ def get_matchups_node(state: WeeklyRecapState):
     return {"week": week, "matchups": matchups}
 
 
+# One ranked team with its roast tag (field descriptions are sent to the LLM).
 class PowerRankingEntry(BaseModel):
     team: str = Field(description="Exact team name as given in the standings data.")
     tag: str = Field(
@@ -75,6 +71,7 @@ class PowerRankingEntry(BaseModel):
     )
 
 
+# Structured LLM output for the recap (field descriptions are sent to the LLM).
 class WeeklySummaryOutput(BaseModel):
     league_summary: str = Field(
         description="The week's recap broken into 3-5 short beats "
@@ -92,6 +89,7 @@ class WeeklySummaryOutput(BaseModel):
 
 
 def league_summary_node(state: WeeklyRecapState):
+    """Write the recap summary and power rankings from results and standings."""
     emit("node_start", node="league_summary")
     t0 = time.monotonic()
 
@@ -160,11 +158,13 @@ def league_summary_node(state: WeeklyRecapState):
 
 
 def power_ranking_image_node(state: WeeklyRecapState):
+    """Generate the recap poster; leaves the image as None if generation fails."""
     emit("node_start", node="power_ranking_image")
     t0 = time.monotonic()
 
     league_name = league_singleton().settings.name
 
+    # Label each team with its rank + tag badge text when both teams were ranked.
     rank_by_team = {pr["team"]: pr for pr in state["power_rankings"]}
     matchup_lines = []
     for m in state["matchups"]:
@@ -224,6 +224,7 @@ def power_ranking_image_node(state: WeeklyRecapState):
 
 
 def build_weekly_recap_graph():
+    """Wire and compile the linear weekly recap graph."""
     graph = StateGraph(WeeklyRecapState)
     graph.add_node("get_matchups", get_matchups_node)
     graph.add_node("league_summary", league_summary_node)

@@ -1,20 +1,7 @@
-"""Supervisor + category-node LangGraph agent:
+"""Chat agent graph: supervisor picks data categories, run_category gathers tool data in parallel,
+personality writes the reply, critique may loop back once.
 
-  supervisor  - classifies the user's latest message into 0+ categories
-                (standings, roster, nfl_team, ...) via structured output.
-                Never calls tools itself, never talks to the user.
-  run_category - one instance per chosen category, dispatched in parallel via
-                Send. Has every tool from every category available, and
-                loops tool-calls <-> itself until it has enough data.
-  personality - the only node that talks to the user. Writes the final,
-                short, in-character reply from every category's gathered data.
-  critique    - reviews personality's reply against the gathered data; if it
-                judges more data would meaningfully improve the answer it
-                sends the plan back through supervisor for one more pass
-                (capped by MAX_CRITIQUE_ROUNDS), otherwise ends.
-
-    START -> supervisor -> Send(run_category) x N (parallel, or none)
-           -> personality -> critique -> (supervisor | END)
+    START -> supervisor -> Send(run_category) x N -> personality -> critique -> (supervisor | END)
 """
 import os
 import time
@@ -40,7 +27,7 @@ API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 
 def invoke_llm(build_llm, *args, **kwargs):
-    """Call build_llm(api_key).invoke(*args, **kwargs)."""
+    """Build an LLM with the configured API key and invoke it."""
     return build_llm(API_KEY).invoke(*args, **kwargs)
 
 
@@ -48,6 +35,7 @@ _CATEGORY_LIST = "\n".join(
     f"- {name}: {desc}" for name, desc in CATEGORY_DESCRIPTIONS.items()
 )
 
+# Every run_category instance gets every tool, regardless of its category.
 _ALL_TOOLS = [tool for tools in CATEGORY_REGISTRY.values() for tool in tools]
 
 MAX_CRITIQUE_ROUNDS = 1
@@ -57,6 +45,7 @@ def _today() -> str:
     return datetime.now().strftime("%A, %Y-%m-%d")
 
 
+# System prompt for classifying a message into data categories.
 def _supervisor_system() -> SystemMessage:
     return SystemMessage(content=(
         f"Today's date is {_today()}. Use it to judge what 'today', 'this "
@@ -109,6 +98,7 @@ def _supervisor_system() -> SystemMessage:
     ))
 
 
+# System prompt for the user-facing reply: grounding, length, links and chart rules.
 def _personality_system() -> SystemMessage:
     return SystemMessage(content=(
         f"Today's date is {_today()}. You are the voice of a fantasy football "
@@ -179,6 +169,7 @@ def _personality_system() -> SystemMessage:
     ))
 
 
+# Supervisor structured output (field descriptions are sent to the LLM).
 class CategoryChoice(BaseModel):
     reasoning: str = Field(
         description="What data would actually answer this well, decided "
@@ -194,6 +185,7 @@ class CategoryChoice(BaseModel):
     )
 
 
+# Shared graph state; `category` is set per parallel run_category instance.
 class AgentState(MessagesState):
     categories: List[str]
     category: str
@@ -202,6 +194,7 @@ class AgentState(MessagesState):
     critique_satisfied: bool
 
 
+# Critique structured output; `missing` becomes the supervisor's next plan.
 class Critique(BaseModel):
     satisfied: bool = Field(
         description="True if the final reply already fully and accurately "
@@ -215,6 +208,7 @@ class Critique(BaseModel):
 
 
 def supervisor_node(state: AgentState):
+    """Classify the latest message into valid data categories plus a plan."""
     emit("node_start", node="supervisor")
     t0 = time.monotonic()
     choice = invoke_llm(
@@ -235,6 +229,7 @@ def supervisor_node(state: AgentState):
 
 
 def route_to_categories(state: AgentState):
+    """Fan out one run_category per chosen category, or skip straight to personality."""
     if not state["categories"]:
         return "personality"
     return [
@@ -248,6 +243,7 @@ def route_to_categories(state: AgentState):
 
 
 def run_category_node(state: AgentState):
+    """Loop LLM tool calls (up to MAX_TOOL_ROUNDS) to gather data for one category."""
     category = state["category"]
     tools = _ALL_TOOLS
     tool_node = ToolNode(tools, handle_tool_errors=True)
@@ -269,6 +265,7 @@ def run_category_node(state: AgentState):
 
     emit("node_start", node="run_category", category=category)
     t0 = time.monotonic()
+    # Tool loop: stop once the model answers without requesting tools.
     local = []
     rounds = 0
     for _ in range(MAX_TOOL_ROUNDS):
@@ -312,6 +309,7 @@ def run_category_node(state: AgentState):
 
 
 def _chunk_text(chunk) -> str:
+    """Extract plain text from a message whose content is a string or content blocks."""
     content = chunk.content
     if isinstance(content, str):
         return content
@@ -325,15 +323,9 @@ def _chunk_text(chunk) -> str:
 
 
 def personality_node(state: AgentState):
-    # The last turn before this is always an assistant message (tool call or
-    # plain reply), and this model rejects a request that doesn't end on a
-    # user turn - so cap the context with a synthetic cue instead of raw history.
-    # Tested reasoning_effort low/medium/high here: none fixed the model
-    # claiming a category's data "wasn't pulled" when its tool results were
-    # right there in a long multi-category transcript (a lost-in-the-middle
-    # grounding failure, not a thinking-budget one) - so give it an explicit
-    # checklist of which categories actually ran instead of making it infer
-    # that from the raw tool-call history.
+    """Write the final in-character reply from the gathered tool data."""
+    # The model rejects requests not ending on a user turn, so end with a synthetic cue; the
+    # checklist of categories that ran stops it claiming data "wasn't pulled" in long transcripts.
     categories_ran = state.get("categories") or []
     checklist = (
         [HumanMessage(content=(
@@ -353,12 +345,7 @@ def personality_node(state: AgentState):
     )
 
     def _llm(key):
-        # reasoning_effort="high": raised from "low" on request. "low" was
-        # previously chosen because higher effort was seen to burn the whole
-        # output budget on "thinking" on ambiguous/off-topic turns and leave
-        # no text behind (empty reply) - the categories_ran checklist above
-        # already fixed the actual grounding bug this was raised to fix, so
-        # re-verify the empty-reply case after any prompt change here.
+        # High effort once caused empty replies on off-topic turns; re-verify that after prompt changes.
         return ChatGoogleGenerativeAI(model=MODEL, google_api_key=key, reasoning_effort="high")
 
     emit("node_start", node="personality")
@@ -379,6 +366,7 @@ def personality_node(state: AgentState):
 
 
 def critique_node(state: AgentState):
+    """Judge whether the reply needs more data; if so, store what is missing as the new plan."""
     emit("node_start", node="critique")
     t0 = time.monotonic()
     result = invoke_llm(
@@ -410,6 +398,7 @@ def critique_node(state: AgentState):
 
 
 def route_after_critique(state: AgentState):
+    """End if satisfied or out of critique rounds, else loop back to the supervisor."""
     if state.get("critique_satisfied", True):
         return END
     if state.get("critique_rounds", 0) > MAX_CRITIQUE_ROUNDS:
@@ -418,6 +407,7 @@ def route_after_critique(state: AgentState):
 
 
 def build_graph():
+    """Wire and compile the chat agent graph."""
     graph = StateGraph(AgentState)
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("run_category", run_category_node)

@@ -1,11 +1,6 @@
-"""Manual audit tool: runs a fixed list of prompts through the LangGraph
-agent (in-process, no server needed) and writes each run's full trace
-(supervisor reasoning, tool calls/results, final reply) to one report file
-under tests/audit_output/<timestamp>/, with any chart JSON rendered to a
-PNG and embedded - open report.md's Preview in VS Code to see it inline.
+"""Manual audit: run PROMPTS through the chat graph and write traces + rendered charts to tests/audit_output/.
 
-Add/edit prompts below as you find bugs worth re-checking, then:
-    python tests/chat_audit.py
+Usage: python tests/chat_audit.py
 """
 import json
 import re
@@ -13,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Make the repo root importable and load .env before importing project modules.
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -38,6 +34,7 @@ CHART_RE = re.compile(r"```chart\s*\n([\s\S]*?)```")
 
 
 def run_one(graph, index: int, prompt: str, run_dir: Path) -> str:
+    """Run one prompt, capturing trace events, and return its markdown report section."""
     events = []
     original_emit = trace.emit
 
@@ -45,6 +42,7 @@ def run_one(graph, index: int, prompt: str, run_dir: Path) -> str:
         events.append({"type": event_type, **data})
         original_emit(event_type, **data)
 
+    # Temporarily swap in the capturing emit for this run.
     trace.emit = capture
     try:
         result = graph.invoke({"messages": [HumanMessage(content=prompt)]})
@@ -53,6 +51,7 @@ def run_one(graph, index: int, prompt: str, run_dir: Path) -> str:
 
     reply = result["messages"][-1].text
 
+    # Summarize supervisor decisions and tool traffic from the captured events.
     lines = [f"## {prompt}", ""]
     for e in events:
         if e["type"] == "node_end" and e.get("node") == "supervisor":
@@ -75,6 +74,7 @@ def run_one(graph, index: int, prompt: str, run_dir: Path) -> str:
 
     lines += ["", "**Reply:**", reply]
 
+    # Render any chart block to a PNG next to the report.
     if match:
         try:
             chart = json.loads(match.group(1))
@@ -91,6 +91,7 @@ def run_one(graph, index: int, prompt: str, run_dir: Path) -> str:
 
 
 def main():
+    """Run every prompt and write report.md into a timestamped folder."""
     base_dir = Path(__file__).resolve().parent / "audit_output"
     run_dir = base_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
