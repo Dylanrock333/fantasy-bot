@@ -1,6 +1,15 @@
 """FastAPI server exposing the agent graphs to the Discord bot (its only client).
 
 Run: uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port 8787
+
+/api/chat runs the graph and returns the reply as plain JSON.
+/api/league/{league_id}/teams lists a league's teams (id + name).
+/api/league/{league_id}/teams/{team_id}/players lists a team's roster.
+/api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.
+/api/weekly-recap's power_ranking_image_base64 is base64 PNG, or null if
+image generation failed - see weekly_recap_graph.py's power_ranking_image_node.
+/api/matchup-preview's matchup_image_base64 is base64 PNG, or null if
+image generation failed - see matchup_preview_graph.py's matchup_image_node.
 """
 import asyncio
 import base64
@@ -26,6 +35,7 @@ from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
 from fantasy_agent.tools.fantasy_player_tools import get_player_leaderboard
 from fantasy_agent.clients.espn_fantasy_client import current_league_id
+from fantasy_agent.clients.espn_fantasy_client import current_league_id, league_singleton
 
 # Graphs are compiled once at import time and shared across requests.
 app = FastAPI()
@@ -54,6 +64,39 @@ async def chat(req: ChatRequest):
 
 
 # Render a `bar`/`comparison` chart JSON payload to PNG.
+@app.get("/api/league/{league_id}/teams")
+async def league_teams(league_id: int):
+    current_league_id.set(league_id)
+    try:
+        league = await asyncio.to_thread(league_singleton)
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+
+    return {"teams": [{"id": t.team_id, "name": t.team_name} for t in league.teams]}
+
+
+@app.get("/api/league/{league_id}/teams/{team_id}/players")
+async def team_players(league_id: int, team_id: int):
+    current_league_id.set(league_id)
+    try:
+        league = await asyncio.to_thread(league_singleton)
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+
+    team = league.get_team_data(team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail=f"team_id {team_id} not found in league {league_id}")
+
+    return {
+        "id": team.team_id,
+        "name": team.team_name,
+        "players": [
+            {"id": p.playerId, "name": p.name, "position": p.position, "proTeam": p.proTeam}
+            for p in team.roster
+        ],
+    }
+
+
 @app.post("/api/chart")
 async def chart(req: dict):
     png_bytes = await asyncio.to_thread(render_chart_png, req)
