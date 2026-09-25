@@ -19,7 +19,7 @@ streaming - there's no web app to stream to).
 ```
 fantasy_agent/       The LangGraph agent and the FastAPI server around it
   graphs/               graph.py builds the main graph: supervisor -> Send(run_category) x N
-                        -> personality; weekly_recap_graph.py and matchup_preview_graph.py
+                        -> personality -> critique (one optional retry); weekly_recap_graph.py and matchup_preview_graph.py
                         are the other two LangGraph entry points
   logging/              trace.py's emit() event hook nodes call instead of print(), for a
                         consistent, greppable log shape
@@ -29,7 +29,7 @@ fantasy_agent/       The LangGraph agent and the FastAPI server around it
                         espn_nfl_client.py (public NFL data API, no auth)
   utils/                chart_render.py renders the bot's ```chart``` JSON (bar/comparison)
                         to a PNG - shared by server.py's /api/chart and tests/chat_audit.py;
-                        image_gen.py / openai_image_gen.py generate recap/preview poster images
+                        openai_image_gen.py generates recap/preview poster images
   server.py            FastAPI server - the whole surface Discord talks to:
                         /api/chat, /api/league/{league_id}/teams,
                         /api/league/{league_id}/teams/{team_id}/players,
@@ -60,10 +60,13 @@ OPENAI_API_KEY=sk-...                 # poster/scoreboard image generation for r
 ESPN_S2=...                           # from your browser's espn.com cookies, private league auth
 SWID=...                              # same
 ```
-`league_id` is passed per-request (in the `/api/chat`, `/api/weekly-recap`, and
-`/api/matchup-preview` bodies), not hardcoded. `fantasy_agent/clients/espn_fantasy_client.py`
-hardcodes `YEAR` for the private league - update that constant there once the season rolls
-over.
+Optional overrides: `FANTASY_AGENT_MODEL` (text model, default `gemini-3.7-flash`) and
+`FANTASY_AGENT_OPENAI_IMAGE_MODEL` (default `gpt-image-2`).
+
+`league_id` is passed per-request (in the `/api/chat`, `/api/weekly-recap`,
+`/api/matchup-preview`, and `/api/leaderboard` bodies), not hardcoded.
+`fantasy_agent/clients/espn_fantasy_client.py` hardcodes `YEAR` and `SEASON_KICKOFF`
+(Thursday of NFL week 1) - update both there once the season rolls over.
 
 ## Running it
 
@@ -78,24 +81,34 @@ funnel` here - the app has no auth, and funnel makes it internet-public).
 ## Architecture
 
 ```
-START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality -> END
+START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality -> critique -> END
+                ^                                                                       |
+                +------------------ not satisfied (at most one retry) -------------------+
 ```
 - **supervisor** classifies the incoming message into zero or more data
   categories via structured output. No tools, never talks to the user.
 - **run_category** - one instance per chosen category, dispatched in
-  parallel via `Send`. Only sees that category's own small tool list, loops
-  tool-calls <-> itself (capped at `MAX_TOOL_ROUNDS`) until it has enough
-  data or hits the cap.
+  parallel via `Send`. Loops tool-calls <-> itself (capped at
+  `MAX_TOOL_ROUNDS`, currently 5) until it has enough data or hits the cap.
+  It is dispatched for one category but has every category's tools bound,
+  so the split parallelizes and labels the work rather than restricting it.
 - **personality** is the only node the user sees. It's under a hard
   grounding rule - every fact in its reply must come from tool results
   gathered this turn, nothing from model memory.
+- **critique** reviews the reply against the gathered data. If more data
+  would meaningfully improve the answer, it stores what's missing as the new
+  plan and loops back to the supervisor, once at most (`MAX_CRITIQUE_ROUNDS`).
 
-It's a deliberately one-shot pipeline, not a network where agents call each
-other: supervisor classifies once, categories run once, personality
-synthesizes once. That bounds it structurally - fixed fan-out, capped tool
-rounds, single synthesis step - so it can't infinite-loop, at the cost of
-not being able to request more data mid-reply if the initial classification
-missed something. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
+It's a deliberately bounded pipeline, not a network where agents call each
+other: supervisor classifies, categories run, personality synthesizes, and
+critique may send it around exactly one more time. Fixed fan-out, capped tool
+rounds, and a capped retry mean it can't infinite-loop. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
+
+### Player leaderboard
+
+`/api/leaderboard` ranks players at a position across rostered and free-agent
+pools (sortable by total points, average points, projected points, or
+ownership %). It calls `get_player_leaderboard` directly - no LLM or graph.
 
 ### Weekly recap and matchup preview
 
@@ -120,9 +133,7 @@ matchup_preview_graph:  get_matchup_data -> flag_lineup_changes -> matchup_previ
   `/api/matchup-preview`.
 
 Both image calls go through `fantasy_agent/utils/openai_image_gen.py`
-(`generate_image`, backed by `OPENAI_API_KEY`) - `image_gen.py` is the same
-shape backed by Gemini's image model instead, kept for quality comparisons
-but not currently wired into either graph. Either call can fail
+(`generate_image`, backed by `OPENAI_API_KEY`). Either call can fail
 independently of the text generation; the server returns the JSON payload
 with the image field `null` rather than erroring the whole request.
 

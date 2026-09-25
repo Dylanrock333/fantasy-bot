@@ -1,14 +1,13 @@
 # LangGraph Workflow
 
-`fantasy_agent/graphs/graph.py` builds a simple three-step pipeline for every
+`fantasy_agent/graphs/graph.py` builds a bounded pipeline for every
 message: figure out what's being asked, go fetch the data for it (in
-parallel if more than one topic applies), then write one reply. It's not a
-free-form network of agents chatting with each other — each step runs
-exactly once (or, for the data-fetching step, once per topic), and there's
-a hard cap on how many times it can call a tool while it's fetching. That
-keeps things predictable and stops the graph from ever looping forever, at
-the cost of not being able to circle back for more data mid-reply if the
-first read on the question missed something.
+parallel if more than one topic applies), write one reply, then have a
+critic check it. It's not a free-form network of agents chatting with each
+other — each step runs once (the data-fetching step once per topic), tool
+calls are hard-capped, and the critic can send the graph back to the
+supervisor at most once. That keeps things predictable and stops the graph
+from ever looping forever.
 
 ```mermaid
 flowchart TD
@@ -19,18 +18,20 @@ flowchart TD
     S -->|fan out| RCn
 
     subgraph "run_category (parallel, one per chosen category)"
-        RC1["run_category: fantasy_roster\ncall tools ⇄ read results\n(up to 4 rounds)"]
-        RC2["run_category: nfl_scores\ncall tools ⇄ read results\n(up to 4 rounds)"]
+        RC1["run_category: fantasy_roster\ncall tools ⇄ read results\n(up to 5 rounds)"]
+        RC2["run_category: nfl_scores\ncall tools ⇄ read results\n(up to 5 rounds)"]
         RCn["run_category: ...\n(fixed tool list per category)"]
     end
 
     RC1 --> P
     RC2 --> P
     RCn --> P
-    P["personality\n(one synthesis pass)"] --> R[Reply]
+    P["personality\n(one synthesis pass)"] --> C["critique\n(needs more data?)"]
+    C -->|satisfied, or retry already used| R[Reply]
+    C -->|not satisfied, at most once| S
 ```
 
-## The three node types
+## The four node types
 
 ### 1. `supervisor` (runs once)
 
@@ -62,13 +63,13 @@ the model invents that isn't in `CATEGORY_REGISTRY` is silently dropped.
 For every category the supervisor picked, the graph spins up its own
 `run_category` instance, all running at the same time (using LangGraph's
 `Send`). If the supervisor picked nothing, the graph skips straight to
-`personality`. Each instance can only see the tools for its own category
-(`CATEGORY_REGISTRY[category]`) — so, for example, a `fantasy_roster` run
-has no way to accidentally reach for an `nfl_scores` tool.
+`personality`. Each instance is labeled with its own category, but every tool from every
+category is bound to it (`_ALL_TOOLS`), so the split parallelizes the work
+rather than restricting which tools a run can reach for.
 
 Each instance goes back and forth with the model: ask it what to do →
 if it wants to call a tool, run the tool and hand back the result → ask
-again → repeat, up to `MAX_TOOL_ROUNDS` (currently 4) times, then stop no
+again → repeat, up to `MAX_TOOL_ROUNDS` (currently 5) times, then stop no
 matter what. It's given the supervisor's `reasoning` as its plan, the same
 nickname warning as the supervisor, and one hard rule: only call tools,
 never try to summarize or answer — writing the actual reply is
@@ -89,7 +90,7 @@ into its prompt and matter a lot:
   injury status change constantly and the model's training data isn't
   live. If the gathered data doesn't cover part of the question, it should
   say so instead of guessing.
-- **Stay short**: 2–5 sentences by default, no restating the question back
+- **Stay short**: 1–6 sentences by default (longer only if needed), no restating the question back
   to the user, and every bare number gets a unit (`"364.9 pts"`, not
   `"(364.9)"`).
 
@@ -102,15 +103,25 @@ differently-scaled metrics, a `"bar"` shape for one metric across several
 things); `fantasy_agent/utils/chart_render.py`'s `render_chart_png` turns that
 JSON into the PNG served at `/api/chart`.
 
+### 4. `critique` (runs once after each `personality`)
+
+A strict-reviewer model call (structured output `Critique`: `satisfied`,
+`missing`) that checks whether the reply fully answers the question using
+only the gathered data. It flags a reply only if pulling more data would
+meaningfully improve it — never for style, tone, or length. If unsatisfied,
+`missing` becomes the new plan and the graph loops back to `supervisor`;
+`route_after_critique` ends the run once `critique_rounds` exceeds
+`MAX_CRITIQUE_ROUNDS` (1), so there is at most one retry. The retry appends
+to the same `messages`, so `personality` answers again from the accumulated
+transcript.
+
 ## Model, keys, and retry
 
 Every node uses the same Gemini model (`FANTASY_AGENT_MODEL` env var,
-default `gemini-3.5-flash`), just with different prompts/tools/settings per
-node. `personality` also sets `reasoning_effort="low"`, since all it's
-doing is phrasing an answer from data that's already been gathered — it
-doesn't need to reason further. Without that cap, vague or off-topic turns
-have been seen to burn their whole output budget on internal reasoning and
-come back with no actual reply text.
+default `gemini-3.7-flash`), just with different prompts/tools/settings per
+node. Reasoning effort is `high` for `supervisor` and `personality` and `medium`
+for `run_category` and `critique`. High effort on `personality` once caused
+empty replies on off-topic turns, so re-verify that after prompt changes.
 
 `invoke_llm()` wraps every model call with `GOOGLE_API_KEY`.
 
@@ -122,8 +133,10 @@ catch that" instead of showing the user an empty message.
 
 `AgentState` (a `MessagesState` subclass) carries `messages` — the running
 conversation, shared across every node — plus `categories` and `reasoning`,
-which the supervisor sets and `run_category` reads, and a `category` field
-naming which category a given parallel branch belongs to.
+which the supervisor sets and `run_category` reads, a `category` field
+naming which category a given parallel branch belongs to, and
+`critique_rounds` / `critique_satisfied`, which `critique` sets to drive the
+retry routing.
 
 ## Tracing
 
