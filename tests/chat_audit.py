@@ -1,9 +1,7 @@
-"""Manual audit: run PROMPTS through the chat graph and write traces + rendered charts to tests/audit_output/.
+"""Manual audit: run PROMPTS through the chat graph and write traces to tests/audit_output/.
 
 Usage: python tests/chat_audit.py
 """
-import json
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +16,6 @@ load_dotenv(ROOT / ".env")
 from langchain_core.messages import HumanMessage
 
 from fantasy_agent.logging import trace
-from fantasy_agent.utils.chart_render import render_chart_png
 from fantasy_agent.graphs.graph import build_graph
 
 PROMPTS = [
@@ -26,14 +23,11 @@ PROMPTS = [
     "Should I start my RB2 this week?",
     "What's Justin Jefferson's stat line this season?",
     "What games are on today?",
-    "Show me a chart comparing the Vikings and Jaguars defenses.",
     "Haha nice, thanks!",
 ]
 
-CHART_RE = re.compile(r"```chart\s*\n([\s\S]*?)```")
 
-
-def run_one(graph, index: int, prompt: str, run_dir: Path) -> str:
+def run_one(graph, prompt: str) -> str:
     """Run one prompt, capturing trace events, and return its markdown report section."""
     events = []
     original_emit = trace.emit
@@ -66,25 +60,10 @@ def run_one(graph, index: int, prompt: str, run_dir: Path) -> str:
     if "https://" in reply or "http://" in reply:
         flags.append("url/image link")
 
-    match = CHART_RE.search(reply)
-    if match:
-        flags.append("chart")
     if flags:
         lines.append(f"- contains: {', '.join(flags)}")
 
     lines += ["", "**Reply:**", reply]
-
-    # Render any chart block to a PNG next to the report.
-    if match:
-        try:
-            chart = json.loads(match.group(1))
-            png_bytes = render_chart_png(chart)
-            if png_bytes:
-                png_path = run_dir / f"{index:02d}_chart.png"
-                png_path.write_bytes(png_bytes)
-                lines += ["", f"![chart]({png_path.name})"]
-        except json.JSONDecodeError as err:
-            lines += ["", f"(chart JSON failed to parse: {err})"]
 
     lines.append("")
     return "\n".join(lines)
@@ -97,7 +76,7 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
 
     graph = build_graph()
-    reports = [run_one(graph, i, p, run_dir) for i, p in enumerate(PROMPTS, 1)]
+    reports = [run_one(graph, p) for p in PROMPTS]
     report_path = run_dir / "report.md"
     report_path.write_text("\n---\n\n".join(reports))
     print(f"\nWrote {len(PROMPTS)} runs to {report_path}")

@@ -96,12 +96,7 @@ into its prompt and matter a lot:
 
 It always has to produce some reply, even for a greeting or an off-topic
 message where no category ran — in that case it just answers from the
-conversation itself. If the user explicitly asks for a chart or visual
-comparison, it emits one fenced ` ```chart ` code block with a JSON object
-instead of prose numbers (a `"comparison"` shape for several
-differently-scaled metrics, a `"bar"` shape for one metric across several
-things); `fantasy_agent/utils/chart_render.py`'s `render_chart_png` turns that
-JSON into the PNG served at `/api/chart`.
+conversation itself.
 
 ### 4. `critique` (runs once after each `personality`)
 

@@ -9,7 +9,6 @@ Python 3 / FastAPI / LangGraph. Client: Discord bot (`the-fantasy-zone-discord`)
 - Weekly recap: LLM league summary + power rankings + generated poster image.
 - Matchup preview: projections + lineup-change flags -> LLM preview + generated scoreboard image.
 - Player leaderboard by position (rostered + free agents), no LLM.
-- Chart rendering: bot emits ```chart``` JSON in replies; `/api/chart` renders it to PNG (matplotlib).
 - Multi-league: `league_id` arrives per request, set in a `ContextVar`; League objects cached in-process 30 min.
 - NOT: stateless per request (no conversation memory/DB; chat takes a single message, no history), no auth on the API, no streaming, no write actions to ESPN (read-only), no scheduling (Discord bot triggers recap/preview), no persistence, no rate limiting.
 - Config via env: `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ESPN_S2`, `SWID`, `FANTASY_AGENT_MODEL` (default `gemini-3.7-flash`), `FANTASY_AGENT_OPENAI_IMAGE_MODEL`. Season is hardcoded (`YEAR=2026`, `SEASON_KICKOFF`) in `espn_fantasy_client.py`.
@@ -21,7 +20,7 @@ Line counts via `wc -l`. Total tracked Python ~2,560 lines.
 ```
 fantasy-bot/
 ├── README.md (158)                  project overview, layout, endpoints, run instructions
-├── requirements.txt (13)            deps (langgraph, langchain-google-genai, openai, espn-api, fastapi, uvicorn, matplotlib, rapidfuzz, deepeval, google-genai...)
+├── requirements.txt (13)            deps (langgraph, langchain-google-genai, openai, espn-api, fastapi, uvicorn, rapidfuzz, deepeval, google-genai...)
 ├── .gitignore (14)                  ignores .env, secrets/, venv/, __pycache__, tests/audit_output/, beads/dolt files
 ├── .env                             local secrets (gitignored; not read)
 ├── secrets/                         folder only (gitignored; holds a service-account file; contents not inspected)
@@ -37,7 +36,7 @@ fantasy-bot/
 │   ├── NFL_PUBLIC_API.md (127)      ESPN public NFL endpoint reference
 │   └── LANGGRAPH_WORKFLOW.md (147)  chat-graph explainer 
 ├── scripts/run_weekly_recap.py (43) CLI: run recap graph for --league-id/--week, print results
-├── tests/chat_audit.py (107)        manual audit: run canned prompts through chat graph, write traces/charts to tests/audit_output/ (no assertions, not a test suite)
+├── tests/chat_audit.py (107)        manual audit: run canned prompts through chat graph, write traces to tests/audit_output/ (no assertions, not a test suite)
 └── fantasy_agent/
     ├── server.py (137)              FastAPI app; compiles 3 graphs at import; 5 endpoints
     ├── graphs/
@@ -60,7 +59,6 @@ fantasy-bot/
     │   ├── nfl_scores_tools.py (57)          2 tools (scoreboard, standings)
     │   └── nfl_team_tools.py (217)           10 tools
     ├── utils/
-    │   ├── chart_render.py (56)     matplotlib `bar`/`comparison` JSON -> PNG bytes
     │   ├── openai_image_gen.py (26) `generate_image(prompt,size,quality)` via OpenAI
     │   └── __init__.py
     ├── logging/trace.py (7)         `emit()` = print("[trace] ...")
@@ -79,7 +77,7 @@ State `AgentState(MessagesState)`: `messages`, `categories: list[str]`, `categor
 |---|---|---|---|---|
 | `supervisor` | MODEL, high, `with_structured_output(CategoryChoice)` | `_supervisor_system()`: date + category list (from tool module docstrings) + 3 few-shot examples | none | `categories` (filtered to valid registry keys), `reasoning` |
 | `run_category` (xN parallel via `Send`) | MODEL, medium, `bind_tools(_ALL_TOOLS)` | inline system: date, dispatched category, supervisor plan, team-name-is-not-player rule | ALL 45 tools from all 10 categories (category only labels the branch) | manual loop, max `MAX_TOOL_ROUNDS=5`, tool calls run one at a time through `ToolNode(handle_tool_errors=True)`; returns appended messages |
-| `personality` | MODEL, high, plain | `_personality_system()`: grounding hard rule, 1-6 sentences, bold player names, one link, chart JSON format | none | one `AIMessage`; fallback text if empty |
+| `personality` | MODEL, high, plain | `_personality_system()`: grounding hard rule, 1-6 sentences, bold player names, one link | none | one `AIMessage`; fallback text if empty |
 | `critique` | MODEL, medium, `with_structured_output(Critique)` | inline strict-reviewer prompt | none | `critique_satisfied`, `critique_rounds+1`, `reasoning`=missing |
 
 Edges / routing:
@@ -131,12 +129,11 @@ FastAPI, no auth, no CORS, no middleware. `current_league_id.set(league_id)` bef
 | Method | Path | Request body | Response | Internals | Errors |
 |---|---|---|---|---|---|
 | POST | `/api/chat` | `{message: str, league_id: int}` | `{reply: str}` | `graph.invoke({"messages":[HumanMessage]})` in thread (chat graph) | 500 `{detail: str(err)}` |
-| POST | `/api/chart` | untyped `dict` (chart JSON: `type` bar/comparison, ...) | `image/png` bytes | `render_chart_png(req)` in thread; direct, no LLM | 422 if shape unrecognized; render exceptions not caught (500 default) |
 | POST | `/api/weekly-recap` | `{league_id: int, week: int=0}` | `{week, league_summary: str, power_rankings: [{rank,team,tag}], power_ranking_image_base64: str\|null}` | `weekly_recap_graph.invoke` in thread | 500 `{detail}` |
 | POST | `/api/matchup-preview` | `{league_id: int, week: int=0, previous_recap_context: str\|null}` | `{week, league_preview: str, matchups: [{team_a,proj_a,record_a,team_b,proj_b,record_b,winner,margin}], matchup_image_base64: str\|null}` | `matchup_preview_graph.invoke` in thread | 500 `{detail}` |
 | POST | `/api/leaderboard` | `{league_id: int, position: str, size: int=15, sort_by: str="points"}` (sort_by: points/avg_points/projected_points/percent_owned; unknown -> points) | `{position, players: [{rank,name,pro_team,total_points,avg_points,projected_total_points,percent_owned,owner_team_name\|null}]}` | `get_player_leaderboard(...)` direct in thread; no LLM | 500 `{detail}` |
 
-Notes: `/api/chart` sets no league id. `week=0` means "default" (recap: `nfl_game_week()`; preview: `league.current_week`). Error `detail` leaks raw exception strings.
+Notes: `week=0` means "default" (recap: `nfl_game_week()`; preview: `league.current_week`). Error `detail` leaks raw exception strings.
 
 ## 5. Audit notes
 
@@ -147,7 +144,7 @@ Notes: `/api/chart` sets no league id. `week=0` means "default" (recap: `nfl_gam
 - Fuzzy-match logic duplicated: `tools/fantasy_roster_tools.py:get_team_roster` (substring then `process.extractOne`, cutoff 75) vs `clients/espn_nfl_client.py` (cutoffs 70 and 80 in two lookups).
 - Near-duplicate LLM builder lambdas (`ChatGoogleGenerativeAI(... reasoning_effort=...)`) repeated in `graph.py` (4x), `weekly_recap_graph.py`, `matchup_preview_graph.py`; recap/preview `try: generate_image / except emit node_error` blocks and base64 encoding in `server.py` are also copy-pasted.
 - Season constants hardcoded in `clients/espn_fantasy_client.py` (`YEAR=2026`, `SEASON_KICKOFF`); `sys.path` hacks repeated in `server.py`, `tools/__init__.py`, `scripts/run_weekly_recap.py`, `tests/chat_audit.py`; `load_dotenv()` called in both `server.py` and `espn_fantasy_client.py`.
-- `tests/chat_audit.py` is the only "test": manual, no assertions; `API_KEY` is read at import time (`graph.py`, `openai_image_gen.py`) so a missing key only fails at first call. `/api/chart` accepts an untyped `dict` and has no size/shape validation; `logging/trace.py` is `print`-based (a package named `logging` inside `fantasy_agent` is easy to confuse with stdlib).
+- `tests/chat_audit.py` is the only "test": manual, no assertions; `API_KEY` is read at import time (`graph.py`, `openai_image_gen.py`) so a missing key only fails at first call. `logging/trace.py` is `print`-based (a package named `logging` inside `fantasy_agent` is easy to confuse with stdlib).
 
 ## Backlog: code debt
 

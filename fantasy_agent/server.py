@@ -5,7 +5,6 @@ Run: uvicorn fantasy_agent.server:app --reload --reload-dir fantasy_agent --port
 /api/chat runs the graph and returns the reply as plain JSON.
 /api/league/{league_id}/teams lists a league's teams (id + name).
 /api/league/{league_id}/teams/{team_id}/players lists a team's roster.
-/api/chart renders a `bar`/`comparison` chart JSON payload to a PNG.
 /api/weekly-recap's power_ranking_image_base64 is base64 PNG, or null if
 image generation failed - see weekly_recap_graph.py's power_ranking_image_node.
 /api/matchup-preview's matchup_image_base64 is base64 PNG, or null if
@@ -25,11 +24,10 @@ from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from fantasy_agent.utils.chart_render import render_chart_png
 from fantasy_agent.graphs.graph import build_graph
 from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
@@ -63,7 +61,6 @@ async def chat(req: ChatRequest):
     return {"reply": result["messages"][-1].text}
 
 
-# Render a `bar`/`comparison` chart JSON payload to PNG.
 @app.get("/api/league/{league_id}/teams")
 async def league_teams(league_id: int):
     current_league_id.set(league_id)
@@ -95,14 +92,6 @@ async def team_players(league_id: int, team_id: int):
             for p in team.roster
         ],
     }
-
-
-@app.post("/api/chart")
-async def chart(req: dict):
-    png_bytes = await asyncio.to_thread(render_chart_png, req)
-    if png_bytes is None:
-        raise HTTPException(status_code=422, detail="unrecognized chart shape")
-    return Response(content=png_bytes, media_type="image/png")
 
 
 class WeeklyRecapRequest(BaseModel):

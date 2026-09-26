@@ -98,7 +98,7 @@ def _supervisor_system() -> SystemMessage:
     ))
 
 
-# System prompt for the user-facing reply: grounding, length, links and chart rules.
+# System prompt for the user-facing reply: grounding, length and link rules.
 def _personality_system() -> SystemMessage:
     return SystemMessage(content=(
         f"Today's date is {_today()}. You are the voice of a fantasy football "
@@ -144,28 +144,7 @@ def _personality_system() -> SystemMessage:
         "gathered - greetings, thanks, opinions, meta questions about the "
         "conversation, and non-football questions all still get a short, "
         "in-character response using only the conversation itself. Never "
-        "produce an empty or whitespace-only reply.\n\n"
-        "CHARTS: if the user explicitly asks to see something as a chart, "
-        "graph, or visual comparison, emit exactly one fenced code block "
-        "labeled `chart` (```chart ... ```) containing a single JSON "
-        "object and nothing else inside the fence. Two shapes are "
-        "supported:\n"
-        "- Comparing two or more things across several differently-scaled "
-        "metrics (e.g. two teams' full stat lines): "
-        '{"type": "comparison", "title": "...", "series": ["Name A", '
-        '"Name B"], "rows": [{"label": "Points Scored", "unit": "pts", '
-        '"values": [344, 474]}, ...]}. Each row is scaled to its own max, '
-        "so wildly different units (points vs. sacks) both stay readable.\n"
-        "- One metric across several categories, all in the same unit "
-        '(e.g. targets per WR): {"type": "bar", "title": "...", "unit": '
-        '"tgt", "categories": ["Name A", "Name B"], "series": [{"name": '
-        '"Targets", "values": [141, 98]}]}. All values share one scale, '
-        "and `series` may hold more than one line for a grouped chart.\n"
-        "Values must be raw numbers (no commas or unit text baked in) - "
-        "put the unit in the `unit` field. You may add one short sentence "
-        "of framing text before the code block, but never restate the "
-        "chart's numbers again in prose below it, and never emit a chart "
-        "block unless a chart/graph was actually requested."
+        "produce an empty or whitespace-only reply."
     ))
 
 
