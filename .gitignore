@@ -12,3 +12,8 @@ tests/audit_output/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+.pytest_cache/
+.deepeval/
+.claude/
+.codex/
+.agents/
