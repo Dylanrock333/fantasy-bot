@@ -69,7 +69,16 @@ async def league_teams(league_id: int):
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
 
-    return {"teams": [{"id": t.team_id, "name": t.team_name} for t in league.teams]}
+    return {
+        "teams": [
+            {
+                "id": t.team_id,
+                "name": t.team_name,
+                "owners": [{"id": o["id"]} for o in t.owners],
+            }
+            for t in league.teams
+        ]
+    }
 
 
 @app.get("/api/league/{league_id}/teams/{team_id}/players")
