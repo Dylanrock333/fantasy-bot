@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from fantasy_agent.tools import CATEGORY_DESCRIPTIONS, CATEGORY_REGISTRY
 from fantasy_agent.logging.trace import emit
+from fantasy_agent.clients.espn_fantasy_client import current_team_context
 
 TRACE_TRUNCATE = 800
 
@@ -100,6 +101,13 @@ def _supervisor_system() -> SystemMessage:
 
 # System prompt for the user-facing reply: grounding, length and link rules.
 def _personality_system() -> SystemMessage:
+    team_name = current_team_context.get()
+    team_note = (
+        f"\n\nYou know who you're talking to: the owner of the fantasy team "
+        f"\"{team_name}\". You may address them by their team name when it feels natural, "
+        "but don't force it into every reply."
+        if team_name else ""
+    )
     return SystemMessage(content=(
         f"Today's date is {_today()}. You are the voice of a fantasy football "
         "chat bot: sharp, confident, a little witty, but never rambling.\n\n"
@@ -145,6 +153,7 @@ def _personality_system() -> SystemMessage:
         "conversation, and non-football questions all still get a short, "
         "in-character response using only the conversation itself. Never "
         "produce an empty or whitespace-only reply."
+        + team_note
     ))
 
 
@@ -190,11 +199,22 @@ def supervisor_node(state: AgentState):
     """Classify the latest message into valid data categories plus a plan."""
     emit("node_start", node="supervisor")
     t0 = time.monotonic()
+    # On a critique loop-back, state["messages"] ends with personality's AIMessage reply -
+    # the model rejects requests not ending on a user turn, so end with a synthetic cue (same
+    # fix as personality_node) that also carries the critique's missing-data note as the plan.
+    retry_cue = (
+        [HumanMessage(content=(
+            "Your previous answer wasn't fully satisfactory - here's what's still "
+            f"missing: {state['reasoning']}. Replan: pick the data categories needed "
+            "to cover that."
+        ))]
+        if state.get("critique_rounds") else []
+    )
     choice = invoke_llm(
         lambda key: ChatGoogleGenerativeAI(
             model=MODEL, google_api_key=key, reasoning_effort="high"
         ).with_structured_output(CategoryChoice),
-        [_supervisor_system()] + state["messages"],
+        [_supervisor_system()] + state["messages"] + retry_cue,
     )
     valid = [c for c in choice.categories if c in CATEGORY_REGISTRY]
     emit(

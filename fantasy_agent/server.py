@@ -33,7 +33,7 @@ from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
 from fantasy_agent.tools.fantasy_player_tools import get_player_leaderboard
 from fantasy_agent.clients.espn_fantasy_client import current_league_id
-from fantasy_agent.clients.espn_fantasy_client import current_league_id, league_singleton
+from fantasy_agent.clients.espn_fantasy_client import current_league_id, league_singleton, current_team_context
 
 # Graphs are compiled once at import time and shared across requests.
 app = FastAPI()
@@ -44,6 +44,14 @@ matchup_preview_graph = build_matchup_preview_graph()
 class ChatRequest(BaseModel):
     message: str
     league_id: int
+    # Optional - set when the Discord caller is linked to a fantasy team (see
+    # the-fantasy-zone-discord's user_teams table). Any field declared here that the client
+    # sends reaches the graph; one not declared (like session_id above) is silently dropped by
+    # Pydantic instead of erroring, so team_id/espn_owner_id are declared even though only
+    # team_name is read today (via current_team_context), to avoid that trap later.
+    team_id: int | None = None
+    team_name: str | None = None
+    espn_owner_id: str | None = None
 
 
 # Run the chat graph and return the final reply text.
@@ -51,6 +59,7 @@ class ChatRequest(BaseModel):
 async def chat(req: ChatRequest):
     messages = [HumanMessage(content=req.message)]
     current_league_id.set(req.league_id)
+    current_team_context.set(req.team_name)
 
     try:
         # to_thread copies contextvars, so current_league_id reaches the worker thread.

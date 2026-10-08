@@ -21,6 +21,11 @@ TTL_SECONDS = 30 * 60  # League cache lifetime (30 min).
 # (tool signatures are exposed to the LLM).
 current_league_id: ContextVar[int] = ContextVar("current_league_id")
 
+# Set per request by server.py when the Discord caller is linked to a fantasy team; read by
+# graph.py's _personality_system() so the reply can be written to that person. Defaults to
+# None (not every caller is linked, and some entry points like scripts/ never set it).
+current_team_context: ContextVar[str | None] = ContextVar("current_team_context", default=None)
+
 _leagues: dict[int, tuple[League, float]] = {}
 
 
