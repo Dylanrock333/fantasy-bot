@@ -46,6 +46,15 @@ def _today() -> str:
     return datetime.now().strftime("%A, %Y-%m-%d")
 
 
+def _end_on_user_turn(messages):
+    """Gemini rejects a request whose history ends on a model turn (e.g. a critique
+    loop-back, where state["messages"] still ends with the prior AIMessage reply) -
+    append a synthetic human cue in that case so every invoke_llm call site is safe."""
+    if messages and isinstance(messages[-1], AIMessage):
+        return messages + [HumanMessage(content="Continue.")]
+    return messages
+
+
 # System prompt for classifying a message into data categories.
 def _supervisor_system() -> SystemMessage:
     return SystemMessage(content=(
@@ -214,7 +223,7 @@ def supervisor_node(state: AgentState):
         lambda key: ChatGoogleGenerativeAI(
             model=MODEL, google_api_key=key, reasoning_effort="high"
         ).with_structured_output(CategoryChoice),
-        [_supervisor_system()] + state["messages"] + retry_cue,
+        _end_on_user_turn([_supervisor_system()] + state["messages"] + retry_cue),
     )
     valid = [c for c in choice.categories if c in CATEGORY_REGISTRY]
     emit(
@@ -273,7 +282,7 @@ def run_category_node(state: AgentState):
             lambda key: ChatGoogleGenerativeAI(
                 model=MODEL, google_api_key=key, reasoning_effort="medium"
             ).bind_tools(tools),
-            [system] + state["messages"] + local,
+            _end_on_user_turn([system] + state["messages"] + local),
         )
         local.append(response)
         if not response.tool_calls:
