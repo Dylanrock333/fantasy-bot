@@ -28,6 +28,14 @@ current_team_context: ContextVar[str | None] = ContextVar("current_team_context"
 
 _leagues: dict[int, tuple[League, float]] = {}
 
+# ESPN lineup slot codes that aren't a starting position outright.
+_SLOT_LABELS = {"BE": "bench", "IR": "IR slot"}
+
+
+def slot_label(slot: str) -> str:
+    """Translate an ESPN lineupSlot/slot_position code into a plain-English label."""
+    return _SLOT_LABELS.get(slot, f"starting {slot}")
+
 
 def get_league(league_id: int) -> League:
     """Build a fresh authenticated League for this season."""

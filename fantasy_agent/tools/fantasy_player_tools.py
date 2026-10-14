@@ -2,7 +2,7 @@
 (private league via clients/espn_fantasy_client.py - for real-NFL athlete stats see nfl_player_tools.py)."""
 from langchain_core.tools import tool
 
-from ..clients.espn_fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton, slot_label
 
 
 @tool
@@ -75,6 +75,7 @@ def get_player_leaderboard(position: str, size: int = 15, sort_by: str = "points
             "projected_total_points": player.projected_total_points,
             "percent_owned": player.percent_owned,
             "owner_team_name": owner_team_name,
+            "slot": slot_label(player.lineupSlot) if owner_team_name else None,
         }
         for i, (player, owner_team_name) in enumerate(ranked)
     ]

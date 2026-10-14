@@ -2,7 +2,7 @@
 league via clients/espn_fantasy_client.py, not real-NFL games)."""
 from langchain_core.tools import tool
 
-from ..clients.espn_fantasy_client import league_singleton, nfl_game_week
+from ..clients.espn_fantasy_client import league_singleton, nfl_game_week, slot_label
 
 
 @tool
@@ -33,10 +33,19 @@ def get_box_scores(week: int = 0) -> str:
                 "hasn't drafted, so ESPN has no roster data.")
     if not box_scores:
         return f"No box scores found for week {week}."
-    lines = [f"{b.home_team} {b.home_score} ({b.home_projected} proj) - "
-             f"{b.away_score} ({b.away_projected} proj) {b.away_team}"
-             for b in box_scores]
-    return f"Week {week} box scores:\n" + "\n".join(lines)
+    blocks = []
+    for b in box_scores:
+        header = (f"{b.home_team} {b.home_score} ({b.home_projected} proj) - "
+                   f"{b.away_score} ({b.away_projected} proj) {b.away_team}")
+        lineup_lines = []
+        for side, lineup in ((b.home_team, b.home_lineup), (b.away_team, b.away_lineup)):
+            for p in lineup:
+                lineup_lines.append(
+                    f"  [{side}] {p.name} ({slot_label(p.slot_position)}, {p.proTeam}) - "
+                    f"{p.points} pts, proj {p.projected_points}"
+                )
+        blocks.append(header + "\n" + "\n".join(lineup_lines))
+    return f"Week {week} box scores:\n" + "\n\n".join(blocks)
 
 
 @tool

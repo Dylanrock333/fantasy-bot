@@ -6,7 +6,7 @@ from datetime import datetime
 from langchain_core.tools import tool
 from rapidfuzz import fuzz, process
 
-from ..clients.espn_fantasy_client import league_singleton
+from ..clients.espn_fantasy_client import league_singleton, slot_label
 
 
 @tool
@@ -29,7 +29,8 @@ def get_team_roster(team_name: str) -> str:
     if not team.roster:
         return f"{team.team_name} has no players on its roster yet."
     lines = [f"{p.name} ({p.position}, {p.proTeam}) - {p.total_points} pts, "
-             f"proj {p.projected_total_points}, status={p.injuryStatus}"
+             f"proj {p.projected_total_points}, status={p.injuryStatus}, "
+             f"slot={slot_label(p.lineupSlot)}"
              for p in team.roster]
     return f"{team.team_name} roster:\n" + "\n".join(lines)
 
