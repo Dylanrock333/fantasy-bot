@@ -200,8 +200,14 @@ def matchup_image_node(state: MatchupPreviewState):
         )
 
     prompt = (
-        "Design a bold, eye-catching scoreboard-style graphic previewing "
-        f"this fantasy football league's Week {state['week']} matchups. "
+        "This is for a fantasy football league - a sports game where "
+        "friends draft real NFL players onto imaginary rosters and "
+        "compete using those players' real-world stats. Every name "
+        "below (league name, team names) is a lighthearted nickname "
+        "a player picked for their own fantasy team, not a statement "
+        "about any real person. Design a bold, eye-catching "
+        f"scoreboard-style graphic previewing this fantasy football "
+        f"league's Week {state['week']} matchups. "
         "Dark background with punchy, high-contrast sports-broadcast "
         "energy - think ESPN/ticker graphics, ESPN Fantasy scoreboard, or "
         "a hype sports betting odds board: bold condensed headline type, "
@@ -230,10 +236,18 @@ def matchup_image_node(state: MatchupPreviewState):
     )
 
     image_bytes = None
-    try:
-        image_bytes = generate_image(prompt, size="1536x1024")
-    except Exception as err:
-        emit("node_error", node="matchup_image", error=str(err))
+    attempts = 2
+    for attempt in range(1, attempts + 1):
+        try:
+            image_bytes = generate_image(prompt, size="1536x1024")
+            break
+        except Exception as err:
+            emit(
+                "node_error",
+                node="matchup_image",
+                error=str(err),
+                attempt=attempt,
+            )
 
     emit("node_end", node="matchup_image", duration_ms=int((time.monotonic() - t0) * 1000))
     return {"matchup_image": image_bytes}
