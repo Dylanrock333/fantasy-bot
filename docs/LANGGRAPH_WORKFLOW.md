@@ -31,84 +31,140 @@ flowchart TD
     C -->|not satisfied, at most once| S
 ```
 
-## The four node types
+## Node functions: chat graph (`fantasy_agent/graphs/graph.py`)
 
-### 1. `supervisor` (runs once)
+#### `supervisor_node(state) -> {categories, reasoning}`
+```python
+choice = invoke_llm(..., with_structured_output(CategoryChoice))  # {reasoning, categories}
+valid = [c for c in choice.categories if c in CATEGORY_REGISTRY]
+return {"categories": valid, "reasoning": choice.reasoning}
+```
+- Runs once. Classifies the message into 0–N categories from `CATEGORY_REGISTRY`
+  (`fantasy_*` = private league, `nfl_*` = real-world data). Never calls a tool.
+- Invalid category names the model invents are dropped silently.
+- On a critique loop-back, the retry prompt carries the critique's `missing` note as the replan.
 
-Reads the conversation so far and decides which **categories** of data the
-latest message actually needs — zero, one, or several. `fantasy_*`
-categories cover the user's private league (`fantasy_roster`,
-`fantasy_standings`, `fantasy_matchup`, `fantasy_player`,
-`fantasy_transaction`); `nfl_*` categories cover real-world NFL data
-(`nfl_scores`, `nfl_team`, `nfl_player`, `nfl_news`, `nfl_game`). The full
-list lives in `fantasy_agent/tools/__init__.py`'s `CATEGORY_REGISTRY`.
+#### `route_to_categories(state) -> "personality" | list[Send]`
+```python
+if not state["categories"]:
+    return "personality"
+return [Send("run_category", {"messages": ..., "category": c, "reasoning": ...}) for c in state["categories"]]
+```
+- Conditional edge (not a node). Fans out one `run_category` branch per category, or skips to `personality` if none were picked.
 
-This node never calls a tool and never talks to the user directly — its
-only job is picking categories. Before it picks, its prompt asks the model
-to think through what data would actually answer the question (which
-stats, which teams/players, what angle) rather than just pattern-matching
-the topic, and to leave categories out entirely when they wouldn't help
-(a greeting or a follow-up "thanks!" gets zero categories). It also knows
-that fantasy team/league nicknames (e.g. "Hurts Cooks with Lamb") are
-user-chosen jokes, not player names — so a question about a fantasy team
-should still trigger `fantasy_roster` to look up the real roster instead of
-guessing from the name.
+#### `run_category_node(state) -> {messages}`
+```python
+for _ in range(MAX_TOOL_ROUNDS):          # MAX_TOOL_ROUNDS = 5
+    response = invoke_llm(..., bind_tools(_ALL_TOOLS))
+    if not response.tool_calls:
+        break
+    for tc in response.tool_calls:
+        ...  # tool_node.invoke, append result to `local`
+return {"messages": local}
+```
+- Runs once per chosen category, in parallel. Every instance is bound to `_ALL_TOOLS` (every tool, not just its own category's).
+- Loops up to `MAX_TOOL_ROUNDS`; stops early once the model replies with no tool calls.
+- Hard rule in its prompt: call tools only, never answer — that's `personality`'s job.
 
-Output is structured (`CategoryChoice`: `reasoning: str`,
-`categories: List[str]`) via `with_structured_output`; any category name
-the model invents that isn't in `CATEGORY_REGISTRY` is silently dropped.
+#### `personality_node(state) -> {messages}`
+```python
+full_text = _chunk_text(invoke_llm(_llm, context))
+if not full_text.strip():
+    full_text = "Sorry, I didn't quite catch that - could you rephrase?"
+return {"messages": [AIMessage(content=full_text)]}
+```
+- Runs once; the only node the user sees output from. One model call, grounded strictly in this turn's tool results.
+- A checklist message lists which categories actually ran, so the model can't claim data "wasn't pulled."
+- Falls back to a fixed apology line if the model returns empty text.
 
-### 2. `run_category` (runs 0–N times in parallel, one per chosen category)
+#### `critique_node(state) -> {critique_rounds, critique_satisfied, reasoning}`
+```python
+result = invoke_llm(..., with_structured_output(Critique))  # {satisfied, missing}
+return {
+    "critique_rounds": state.get("critique_rounds", 0) + 1,
+    "critique_satisfied": result.satisfied,
+    "reasoning": result.missing or state.get("reasoning", ""),
+}
+```
+- Runs once after every `personality` pass. Flags unsatisfied only if more data would meaningfully change the answer — never for style/tone/length.
+- `missing` (if any) overwrites `reasoning`, becoming the supervisor's next plan.
 
-For every category the supervisor picked, the graph spins up its own
-`run_category` instance, all running at the same time (using LangGraph's
-`Send`). If the supervisor picked nothing, the graph skips straight to
-`personality`. Each instance is labeled with its own category, but every tool from every
-category is bound to it (`_ALL_TOOLS`), so the split parallelizes the work
-rather than restricting which tools a run can reach for.
+#### `route_after_critique(state) -> "supervisor" | END`
+```python
+if state.get("critique_satisfied", True):
+    return END
+if state.get("critique_rounds", 0) > MAX_CRITIQUE_ROUNDS:   # MAX_CRITIQUE_ROUNDS = 1
+    return END
+return "supervisor"
+```
+- Conditional edge. At most one retry loop back to `supervisor`; ends otherwise.
 
-Each instance goes back and forth with the model: ask it what to do →
-if it wants to call a tool, run the tool and hand back the result → ask
-again → repeat, up to `MAX_TOOL_ROUNDS` (currently 5) times, then stop no
-matter what. It's given the supervisor's `reasoning` as its plan, the same
-nickname warning as the supervisor, and one hard rule: only call tools,
-never try to summarize or answer — writing the actual reply is
-`personality`'s job alone.
+## Node functions: weekly recap graph (`fantasy_agent/graphs/weekly_recap_graph.py`)
 
-All categories' results land in the shared `messages` list in graph state
-(LangGraph merges parallel `Send` branches' state updates automatically).
+`START -> get_matchups -> league_summary -> power_ranking_image -> END`, all nodes run exactly once.
 
-### 3. `personality` (runs once, the only node the user sees)
+#### `get_matchups_node(state) -> {week, matchups}`
+```python
+week = state.get("week") or nfl_game_week()
+box_scores = league_singleton().box_scores(week=week)
+return {"week": week, "matchups": [{"home_team", "away_team", "home_score", "away_score"}, ...]}
+```
+- Fetches the week's final box scores; defaults to the current NFL week.
 
-Takes whatever data every category gathered (already sitting in
-`messages`) and writes one reply in a single model call. Two rules are baked
-into its prompt and matter a lot:
+#### `league_summary_node(state) -> {league_summary, power_rankings}`
+```python
+result = invoke_llm(_llm, [system, prompt])  # with_structured_output(WeeklySummaryOutput)
+return {"league_summary": result.league_summary.strip(), "power_rankings": [...]}
+```
+- One model call turns this week's scores + current standings into recap beats and a ranked, tagged list of every team.
 
-- **Stay grounded**: every fact, name, or number in the reply has to come
-  from this turn's tool results — never from the model's own memory or
-  "usually true" background knowledge, since rosters, depth charts, and
-  injury status change constantly and the model's training data isn't
-  live. If the gathered data doesn't cover part of the question, it should
-  say so instead of guessing.
-- **Stay short**: 1–6 sentences by default (longer only if needed), no restating the question back
-  to the user, and every bare number gets a unit (`"364.9 pts"`, not
-  `"(364.9)"`).
+#### `power_ranking_image_node(state) -> {power_ranking_image}`
+```python
+try:
+    image_bytes = generate_image(prompt, size="1536x1024")
+except Exception as err:
+    emit("node_error", node="power_ranking_image", error=str(err))
+return {"power_ranking_image": image_bytes}
+```
+- Renders the poster graphic from the matchups + power rankings. On failure, leaves the image `None` instead of raising.
 
-It always has to produce some reply, even for a greeting or an off-topic
-message where no category ran — in that case it just answers from the
-conversation itself.
+## Node functions: matchup preview graph (`fantasy_agent/graphs/matchup_preview_graph.py`)
 
-### 4. `critique` (runs once after each `personality`)
+`START -> get_matchup_data -> flag_lineup_changes -> matchup_preview -> matchup_image -> END`, all nodes run exactly once.
 
-A strict-reviewer model call (structured output `Critique`: `satisfied`,
-`missing`) that checks whether the reply fully answers the question using
-only the gathered data. It flags a reply only if pulling more data would
-meaningfully improve it — never for style, tone, or length. If unsatisfied,
-`missing` becomes the new plan and the graph loops back to `supervisor`;
-`route_after_critique` ends the run once `critique_rounds` exceeds
-`MAX_CRITIQUE_ROUNDS` (1), so there is at most one retry. The retry appends
-to the same `messages`, so `personality` answers again from the accumulated
-transcript.
+#### `get_matchup_data_node(state) -> {week, matchups}`
+```python
+box_scores = league.box_scores(week=week)
+return {"week": week, "matchups": [{"team_a", "proj_a", "record_a", "team_b", "proj_b", "record_b", "winner", "margin"}, ...]}
+```
+- Builds each matchup's projections, records, and projected winner/margin from box scores + standings.
+
+#### `flag_lineup_changes_node(state) -> {lineup_flags}`
+```python
+duds = [p for p in last_week_lineup if p.slot_position not in BENCH_SLOTS and not p.on_bye_week and p.points == 0]
+# then check this week's roster/starters to classify each dud as dropped/benched/still-starting
+return {"lineup_flags": {team: [{"player", "status", "injury_status"?}, ...]}}
+```
+- Flags last week's zero-point starters and tags each as `dropped/traded away`, `benched`, or `still starting despite the zero`.
+
+#### `matchup_preview_node(state) -> {league_preview, matchups}`
+```python
+result = invoke_llm(_llm, [system, prompt])  # with_structured_output(MatchupPreviewOutput)
+return {"league_preview": result.league_preview.strip(), "matchups": state["matchups"]}
+```
+- One model call writes one joke beat per matchup, folding in `lineup_flags` and, if present, last week's recap as callback color.
+
+#### `matchup_image_node(state) -> {matchup_image}`
+```python
+for attempt in range(1, attempts + 1):   # attempts = 2
+    try:
+        image_bytes = generate_image(prompt, size="1536x1024")
+        break
+    except Exception as err:
+        emit("node_error", node="matchup_image", error=str(err), attempt=attempt)
+return {"matchup_image": image_bytes}
+```
+- Renders the scoreboard graphic; retries once on failure, leaves the image `None` if both attempts fail.
 
 ## Model, keys, and retry
 
