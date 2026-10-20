@@ -16,7 +16,12 @@ load_dotenv(ROOT / ".env")
 from langchain_core.messages import HumanMessage
 
 from fantasy_agent.logging import trace
+from fantasy_agent.graphs import graph as graph_module
 from fantasy_agent.graphs.graph import build_graph
+from fantasy_agent.clients.espn_fantasy_client import current_league_id, current_team_context
+
+current_league_id.set(1992397255)
+current_team_context.set("Brotherhood of the Gridiron")
 
 PROMPTS = [
     "Who has the better defense, Vikings or Jaguars?",
@@ -24,6 +29,10 @@ PROMPTS = [
     "What's Justin Jefferson's stat line this season?",
     "What games are on today?",
     "Haha nice, thanks!",
+    "As of right now which flex player has the most points this week",
+    "Okay between Flok, Bass, pinero, Boswell, and McLaughlin who is going to have the best chance of having the most points. This week based off the team how often they make it to field goal range and how accurate the kicker is",
+    "What is the best player i can trade Jordan love to for a RB2 and WR2",
+    "What do you think about this trade AJ Brown and Cook for olave and tuten"
 ]
 
 
@@ -36,12 +45,14 @@ def run_one(graph, prompt: str) -> str:
         events.append({"type": event_type, **data})
         original_emit(event_type, **data)
 
-    # Temporarily swap in the capturing emit for this run.
-    trace.emit = capture
+    # graph.py did `from ...trace import emit`, so it holds its own local
+    # name bound to the function object - patching trace.emit alone never
+    # reaches it. Patch the name graph.py actually calls instead.
+    graph_module.emit = capture
     try:
         result = graph.invoke({"messages": [HumanMessage(content=prompt)]})
     finally:
-        trace.emit = original_emit
+        graph_module.emit = original_emit
 
     reply = result["messages"][-1].text
 
