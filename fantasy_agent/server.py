@@ -13,6 +13,7 @@ image generation failed - see matchup_preview_graph.py's matchup_image_node.
 import asyncio
 import base64
 import sys
+import time
 from pathlib import Path
 
 # Make the repo root importable and load .env before importing project modules.
@@ -28,6 +29,7 @@ from fastapi import FastAPI, HTTPException
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
+from fantasy_agent.logging.trace import emit
 from fantasy_agent.graphs.graph import build_graph
 from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
@@ -61,11 +63,14 @@ async def chat(req: ChatRequest):
     current_league_id.set(req.league_id)
     current_team_context.set(req.team_name)
 
+    t0 = time.monotonic()
     try:
         # to_thread copies contextvars, so current_league_id reaches the worker thread.
         result = await asyncio.to_thread(graph.invoke, {"messages": messages})
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        emit("graph_end", graph="chat", duration_ms=int((time.monotonic() - t0) * 1000))
 
     return {"reply": result["messages"][-1].text}
 
@@ -121,12 +126,15 @@ class WeeklyRecapRequest(BaseModel):
 @app.post("/api/weekly-recap")
 async def weekly_recap(req: WeeklyRecapRequest):
     current_league_id.set(req.league_id)
+    t0 = time.monotonic()
     try:
         result = await asyncio.to_thread(
             weekly_recap_graph.invoke, {"week": req.week}
         )
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        emit("graph_end", graph="weekly_recap", duration_ms=int((time.monotonic() - t0) * 1000))
 
     image_bytes = result.get("power_ranking_image")
     return {
@@ -149,6 +157,7 @@ class MatchupPreviewRequest(BaseModel):
 @app.post("/api/matchup-preview")
 async def matchup_preview(req: MatchupPreviewRequest):
     current_league_id.set(req.league_id)
+    t0 = time.monotonic()
     try:
         result = await asyncio.to_thread(
             matchup_preview_graph.invoke,
@@ -156,6 +165,8 @@ async def matchup_preview(req: MatchupPreviewRequest):
         )
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        emit("graph_end", graph="matchup_preview", duration_ms=int((time.monotonic() - t0) * 1000))
 
     image_bytes = result.get("matchup_image")
     return {
