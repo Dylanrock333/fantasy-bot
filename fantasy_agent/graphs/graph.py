@@ -36,9 +36,6 @@ _CATEGORY_LIST = "\n".join(
     f"- {name}: {desc}" for name, desc in CATEGORY_DESCRIPTIONS.items()
 )
 
-# Every run_category instance gets every tool, regardless of its category.
-_ALL_TOOLS = [tool for tools in CATEGORY_REGISTRY.values() for tool in tools]
-
 MAX_CRITIQUE_ROUNDS = 1
 
 
@@ -47,9 +44,7 @@ def _today() -> str:
 
 
 def _end_on_user_turn(messages):
-    """Gemini rejects a request whose history ends on a model turn (e.g. a critique
-    loop-back, where state["messages"] still ends with the prior AIMessage reply) -
-    append a synthetic human cue in that case so every invoke_llm call site is safe."""
+    """Append a synthetic human turn if messages end on an AIMessage (Gemini requires a user turn last)."""
     if messages and isinstance(messages[-1], AIMessage):
         return messages + [HumanMessage(content="Continue.")]
     return messages
@@ -151,12 +146,8 @@ def _personality_system() -> SystemMessage:
         "short paragraphs with a blank line between them instead of one "
         "dense block - but don't force a line break onto a short, single-"
         "point reply.\n\n"
-        "LINKS: if any tool result contains a URL (e.g. a news article "
-        "link), include exactly ONE of them - the single most relevant to "
-        "the question - verbatim, on its own at the very end of your "
-        "reply. Never paraphrase, shorten, or wrap it in markdown. If "
-        "multiple tool results have URLs, pick just one and drop the "
-        "rest.\n\n"
+        "Never include a URL or link in your reply, even if a tool result "
+        "contains one.\n\n"
         "You must always write a reply, even when no tool data was "
         "gathered - greetings, thanks, opinions, meta questions about the "
         "conversation, and non-football questions all still get a short, "
@@ -208,9 +199,7 @@ def supervisor_node(state: AgentState):
     """Classify the latest message into valid data categories plus a plan."""
     emit("node_start", node="supervisor")
     t0 = time.monotonic()
-    # On a critique loop-back, state["messages"] ends with personality's AIMessage reply -
-    # the model rejects requests not ending on a user turn, so end with a synthetic cue (same
-    # fix as personality_node) that also carries the critique's missing-data note as the plan.
+    # On a critique loop-back, feed the missing-data note in as the new plan.
     retry_cue = (
         [HumanMessage(content=(
             "Your previous answer wasn't fully satisfactory - here's what's still "
@@ -221,7 +210,7 @@ def supervisor_node(state: AgentState):
     )
     choice = invoke_llm(
         lambda key: ChatGoogleGenerativeAI(
-            model=MODEL, google_api_key=key, reasoning_effort="high"
+            model=MODEL, google_api_key=key, reasoning_effort="low"
         ).with_structured_output(CategoryChoice),
         _end_on_user_turn([_supervisor_system()] + state["messages"] + retry_cue),
     )
@@ -253,13 +242,13 @@ def route_to_categories(state: AgentState):
 def run_category_node(state: AgentState):
     """Loop LLM tool calls (up to MAX_TOOL_ROUNDS) to gather data for one category."""
     category = state["category"]
-    tools = _ALL_TOOLS
+    tools = CATEGORY_REGISTRY[category]
     tool_node = ToolNode(tools, handle_tool_errors=True)
     system = SystemMessage(content=(
         f"Today's date is {_today()}. You were dispatched for the "
-        f"'{category}' category, but every tool from every category is "
-        "available to you here - use whichever ones actually serve the "
-        f"plan below, not just your own category's. The "
+        f"'{category}' category. Only the tools for this category are "
+        "available to you here - use them to serve the plan below, and "
+        "call each tool at most once unless its result was an error. The "
         f"supervisor's plan for this question: \"{state['reasoning']}\"\n"
         "Fantasy team/league names (e.g. \"Hurts Cooks with Lamb\") are "
         "arbitrary nicknames the user picked, often puns on player "
@@ -332,8 +321,7 @@ def _chunk_text(chunk) -> str:
 
 def personality_node(state: AgentState):
     """Write the final in-character reply from the gathered tool data."""
-    # The model rejects requests not ending on a user turn, so end with a synthetic cue; the
-    # checklist of categories that ran stops it claiming data "wasn't pulled" in long transcripts.
+    # Checklist stops the model claiming data "wasn't pulled" for a category that did run.
     categories_ran = state.get("categories") or []
     checklist = (
         [HumanMessage(content=(
@@ -379,7 +367,7 @@ def critique_node(state: AgentState):
     t0 = time.monotonic()
     result = invoke_llm(
         lambda key: ChatGoogleGenerativeAI(
-            model=MODEL, google_api_key=key, reasoning_effort="medium"
+            model=MODEL, google_api_key=key, reasoning_effort="low"
         ).with_structured_output(Critique),
         [SystemMessage(content=(
             "You are a strict reviewer for a fantasy football chat bot. "
