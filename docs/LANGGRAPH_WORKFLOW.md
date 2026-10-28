@@ -2,12 +2,11 @@
 
 `fantasy_agent/graphs/graph.py` builds a bounded pipeline for every
 message: figure out what's being asked, go fetch the data for it (in
-parallel if more than one topic applies), write one reply, then have a
-critic check it. It's not a free-form network of agents chatting with each
-other — each step runs once (the data-fetching step once per topic), tool
-calls are hard-capped, and the critic can send the graph back to the
-supervisor at most once. That keeps things predictable and stops the graph
-from ever looping forever.
+parallel if more than one topic applies), then write one reply. It's not a
+free-form network of agents chatting with each other — each step runs
+exactly once (the data-fetching step once per topic) and tool calls are
+hard-capped. That keeps things predictable and stops the graph from ever
+looping forever.
 
 ```mermaid
 flowchart TD
@@ -26,9 +25,7 @@ flowchart TD
     RC1 --> P
     RC2 --> P
     RCn --> P
-    P["personality\n(one synthesis pass)"] --> C["critique\n(needs more data?)"]
-    C -->|satisfied, or retry already used| R[Reply]
-    C -->|not satisfied, at most once| S
+    P["personality\n(one synthesis pass)"] --> R[Reply]
 ```
 
 ## Node functions: chat graph (`fantasy_agent/graphs/graph.py`)
@@ -42,7 +39,6 @@ return {"categories": valid, "reasoning": choice.reasoning}
 - Runs once. Classifies the message into 0–N categories from `CATEGORY_REGISTRY`
   (`fantasy_*` = private league, `nfl_*` = real-world data). Never calls a tool.
 - Invalid category names the model invents are dropped silently.
-- On a critique loop-back, the retry prompt carries the critique's `missing` note as the replan.
 
 #### `route_to_categories(state) -> "personality" | list[Send]`
 ```python
@@ -54,15 +50,18 @@ return [Send("run_category", {"messages": ..., "category": c, "reasoning": ...})
 
 #### `run_category_node(state) -> {messages}`
 ```python
+tools = CATEGORY_REGISTRY[category]
 for _ in range(MAX_TOOL_ROUNDS):          # MAX_TOOL_ROUNDS = 5
-    response = invoke_llm(..., bind_tools(_ALL_TOOLS))
+    response = invoke_llm(..., bind_tools(tools))
     if not response.tool_calls:
         break
     for tc in response.tool_calls:
         ...  # tool_node.invoke, append result to `local`
 return {"messages": local}
 ```
-- Runs once per chosen category, in parallel. Every instance is bound to `_ALL_TOOLS` (every tool, not just its own category's).
+- Runs once per chosen category, in parallel. Each instance is bound only to
+  `CATEGORY_REGISTRY[category]` - its own category's tools, not every tool -
+  so the fan-out both parallelizes and restricts the work.
 - Loops up to `MAX_TOOL_ROUNDS`; stops early once the model replies with no tool calls.
 - Hard rule in its prompt: call tools only, never answer — that's `personality`'s job.
 
@@ -76,28 +75,7 @@ return {"messages": [AIMessage(content=full_text)]}
 - Runs once; the only node the user sees output from. One model call, grounded strictly in this turn's tool results.
 - A checklist message lists which categories actually ran, so the model can't claim data "wasn't pulled."
 - Falls back to a fixed apology line if the model returns empty text.
-
-#### `critique_node(state) -> {critique_rounds, critique_satisfied, reasoning}`
-```python
-result = invoke_llm(..., with_structured_output(Critique))  # {satisfied, missing}
-return {
-    "critique_rounds": state.get("critique_rounds", 0) + 1,
-    "critique_satisfied": result.satisfied,
-    "reasoning": result.missing or state.get("reasoning", ""),
-}
-```
-- Runs once after every `personality` pass. Flags unsatisfied only if more data would meaningfully change the answer — never for style/tone/length.
-- `missing` (if any) overwrites `reasoning`, becoming the supervisor's next plan.
-
-#### `route_after_critique(state) -> "supervisor" | END`
-```python
-if state.get("critique_satisfied", True):
-    return END
-if state.get("critique_rounds", 0) > MAX_CRITIQUE_ROUNDS:   # MAX_CRITIQUE_ROUNDS = 1
-    return END
-return "supervisor"
-```
-- Conditional edge. At most one retry loop back to `supervisor`; ends otherwise.
+- `personality -> END`: the graph ends here. There is no review/retry step.
 
 ## Node functions: weekly recap graph (`fantasy_agent/graphs/weekly_recap_graph.py`)
 
@@ -166,12 +144,12 @@ return {"matchup_image": image_bytes}
 ```
 - Renders the scoreboard graphic; retries once on failure, leaves the image `None` if both attempts fail.
 
-## Model, keys, and retry
+## Model and keys
 
 Every node uses the same Gemini model (`FANTASY_AGENT_MODEL` env var,
 default `gemini-3.7-flash`), just with different prompts/tools/settings per
-node. Reasoning effort is `high` for `supervisor` and `personality` and `medium`
-for `run_category` and `critique`. High effort on `personality` once caused
+node. Reasoning effort is `low` for `supervisor`, `high` for `personality`,
+and `medium` for `run_category`. High effort on `personality` once caused
 empty replies on off-topic turns, so re-verify that after prompt changes.
 
 `invoke_llm()` wraps every model call with `GOOGLE_API_KEY`.
@@ -184,20 +162,20 @@ catch that" instead of showing the user an empty message.
 
 `AgentState` (a `MessagesState` subclass) carries `messages` — the running
 conversation, shared across every node — plus `categories` and `reasoning`,
-which the supervisor sets and `run_category` reads, a `category` field
-naming which category a given parallel branch belongs to, and
-`critique_rounds` / `critique_satisfied`, which `critique` sets to drive the
-retry routing.
+which the supervisor sets and `run_category` reads, and a `category` field
+naming which category a given parallel branch belongs to.
 
 ## Tracing
 
 Every node calls `fantasy_agent/logging/trace.py`'s `emit()` around its work
 (`node_start`/`node_end` pairs, plus `tool_call`/`tool_result` inside
-`run_category`) rather than printing directly. `emit()` just prints
-(`[trace] <event> <data>`) — it's a local log line, nothing consumes these
-over the network. `tests/chat_audit.py` is the one place that reads them
-back, by temporarily monkeypatching `trace.emit` to also capture events
-into its report.
+`run_category`) rather than printing directly. `fantasy_agent/server.py` also
+emits one `graph_end` event per request (graph name + total invoke duration
+in ms) for the chat, weekly-recap, and matchup-preview graphs. `emit()` just
+prints (`[trace] <event> <data>`) — it's a local log line, nothing consumes
+these over the network. `tests/chat_audit.py` is the one place that reads
+node-level events back, by temporarily monkeypatching `trace.emit` to also
+capture events into its report.
 
 ## Adding a new data source
 

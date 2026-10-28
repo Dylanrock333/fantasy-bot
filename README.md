@@ -19,7 +19,7 @@ streaming - there's no web app to stream to).
 ```
 fantasy_agent/       The LangGraph agent and the FastAPI server around it
   graphs/               graph.py builds the main graph: supervisor -> Send(run_category) x N
-                        -> personality -> critique (one optional retry); weekly_recap_graph.py and matchup_preview_graph.py
+                        -> personality -> END; weekly_recap_graph.py and matchup_preview_graph.py
                         are the other two LangGraph entry points
   logging/              trace.py's emit() event hook nodes call instead of print(), for a
                         consistent, greppable log shape
@@ -79,28 +79,23 @@ funnel` here - the app has no auth, and funnel makes it internet-public).
 ## Architecture
 
 ```
-START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality -> critique -> END
-                ^                                                                       |
-                +------------------ not satisfied (at most one retry) -------------------+
+START -> supervisor -> Send(run_category) x N (parallel, or none) -> personality -> END
 ```
 - **supervisor** classifies the incoming message into zero or more data
   categories via structured output. No tools, never talks to the user.
 - **run_category** - one instance per chosen category, dispatched in
   parallel via `Send`. Loops tool-calls <-> itself (capped at
   `MAX_TOOL_ROUNDS`, currently 5) until it has enough data or hits the cap.
-  It is dispatched for one category but has every category's tools bound,
-  so the split parallelizes and labels the work rather than restricting it.
+  Each instance is bound only to its own category's tools, so the split
+  both parallelizes and restricts the work.
 - **personality** is the only node the user sees. It's under a hard
   grounding rule - every fact in its reply must come from tool results
   gathered this turn, nothing from model memory.
-- **critique** reviews the reply against the gathered data. If more data
-  would meaningfully improve the answer, it stores what's missing as the new
-  plan and loops back to the supervisor, once at most (`MAX_CRITIQUE_ROUNDS`).
 
 It's a deliberately bounded pipeline, not a network where agents call each
-other: supervisor classifies, categories run, personality synthesizes, and
-critique may send it around exactly one more time. Fixed fan-out, capped tool
-rounds, and a capped retry mean it can't infinite-loop. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
+other: supervisor classifies, categories run in parallel, and personality
+synthesizes one final reply. Fixed fan-out and capped tool rounds mean it
+can't infinite-loop. See `docs/LANGGRAPH_WORKFLOW.md` for the node-level detail.
 
 ### Player leaderboard
 
@@ -134,36 +129,3 @@ Both image calls go through `fantasy_agent/utils/openai_image_gen.py`
 (`generate_image`, backed by `OPENAI_API_KEY`). Either call can fail
 independently of the text generation; the server returns the JSON payload
 with the image field `null` rather than erroring the whole request.
-
-## Roadmap / infra TODOs
-
-Cross-cutting ops work spanning this repo and the
-[Discord bot](https://github.com/Dylanrock333/the-fantasy-zone-discord).
-Tracked here (and mirrored in the Discord repo's README) until there's a
-shared issue tracker.
-
-1. **Per-user private channels** - let a member get a private channel/thread
-   with the bot (strategy chat, personal stats) that other league members
-   can't read. Discord-side feature (permission overwrites or private
-   threads); this API is stateless per-request so it just needs the caller
-   to pass through a user-scoped channel id, no server change expected.
-2. **Prod vs. test deployments** - split into a prod deployment (the real
-   league list) and a test deployment (a small set of leagues Dylan
-   controls) so new features/changes land in test first. Needs each
-   deployment to run its own bot process + API instance with its own env
-   vars/league config; this API is already stateless so running two copies
-   should be cheap.
-3. **Zero-downtime prod updates** - deploy changes to prod without a hard
-   restart/reset that drops in-flight commands or scheduled jobs. Likely a
-   process-manager or rolling-deploy concern more than an app-code concern.
-4. **Consolidate commands/commish tools** - unify admin (commissioner-only)
-   commands and any "reset the server" style operations behind one
-   consistent surface instead of ad hoc scripts/commands.
-5. **(Bonus) One-click server duplication** - an endpoint that spins up a
-   duplicate Discord server from a name + league id and returns a commish
-   invite link. First joiner claims commish (1 per league, needs a
-   succession/hierarchy plan for if they leave); team names get pulled in
-   automatically; each subsequent joiner picks a team that then sticks to
-   their Discord user id (admin-resettable) so the bot knows whose team is
-   asking by default. This is the biggest lift of the five - needs a
-   user/team/league identity model that doesn't exist yet on either side.
