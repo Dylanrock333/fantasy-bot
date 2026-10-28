@@ -74,7 +74,15 @@ def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
             return p
     names = [p["fullName"].lower() for p in _roster_cache[team_id]]
     match = process.extractOne(q, names, scorer=fuzz.WRatio, score_cutoff=80)
-    return _roster_cache[team_id][match[2]] if match else None
+    if match is None:
+        return None
+    candidate = _roster_cache[team_id][match[2]]
+    # WRatio can score two different people highly if they share a last name
+    # (e.g. "A.J. Brown" vs "Hollywood Brown") - require the first-name
+    # initial to agree too, or treat it as no match.
+    if q[0] != candidate["fullName"].strip().lower()[0]:
+        return None
+    return candidate
 
 
 def resolve_event(pro_team: str, week: int = 0) -> str | None:
