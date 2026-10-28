@@ -41,6 +41,15 @@ PROMPTS = [
 ]
 
 
+def _call_summary(e: dict) -> str:
+    """One line of model/token/finish-reason detail for an `llm_usage` event."""
+    return (
+        f"call summary: model={e.get('model')}, in={e.get('input_tokens')}, "
+        f"out={e.get('output_tokens')} (thinking={e.get('thinking_tokens')}), "
+        f"cached={e.get('cached_tokens')}, finish={e.get('finish_reason')}"
+    )
+
+
 def run_one(graph, prompt: str) -> str:
     """Run one prompt, capturing trace events, and return its markdown report section."""
     events = []
@@ -83,13 +92,28 @@ def run_one(graph, prompt: str) -> str:
         category_rounds.clear()
         category_done.clear()
 
+    # llm_usage fires right before the node_end of the node it belongs to, except inside
+    # run_category where it fires once per tool round - buffer the rest by node name.
+    pending_usage = {}
     for e in events:
         node = e.get("node")
+        if e["type"] == "llm_usage":
+            if node == "run_category":
+                cat = e.get("category")
+                if cat not in category_rounds:
+                    category_order.append(cat)
+                    category_rounds[cat] = {}
+                category_rounds[cat].setdefault(e.get("round", 0), []).append(_call_summary(e))
+            else:
+                pending_usage[node] = e
+            continue
         if e["type"] == "node_end" and node == "supervisor":
             supervisor_round += 1
             lines.append(f"**[supervisor round {supervisor_round}]** ({e.get('duration_ms') / 1000:.1f}s)")
             lines.append(f"- categories: {e.get('categories')}")
             lines.append(f"- reasoning: {e.get('reasoning')}")
+            if "supervisor" in pending_usage:
+                lines.append(f"- {_call_summary(pending_usage.pop('supervisor'))}")
         elif e["type"] in ("tool_call", "tool_result"):
             cat = e.get("category")
             if cat not in category_rounds:
@@ -109,6 +133,8 @@ def run_one(graph, prompt: str) -> str:
         elif e["type"] == "node_end" and node == "personality":
             flush_categories()
             lines.append(f"**[personality]** ({e.get('duration_ms') / 1000:.1f}s)")
+            if "personality" in pending_usage:
+                lines.append(f"- {_call_summary(pending_usage.pop('personality'))}")
         # critique node disabled in graph.py, so this never fires currently.
         # elif e["type"] == "node_end" and node == "critique":
         #     verdict = "satisfied" if e.get("satisfied") else "NOT satisfied -> looping back to supervisor"

@@ -32,6 +32,23 @@ def invoke_llm(build_llm, *args, **kwargs):
     return build_llm(API_KEY).invoke(*args, **kwargs)
 
 
+def _log_usage(node: str, response, **extra) -> None:
+    """Emit the model, token counts, and finish reason for one LLM call."""
+    usage = response.usage_metadata or {}
+    meta = response.response_metadata or {}
+    emit(
+        "llm_usage",
+        node=node,
+        model=meta.get("model_name"),
+        finish_reason=meta.get("finish_reason"),
+        input_tokens=usage.get("input_tokens"),
+        output_tokens=usage.get("output_tokens"),
+        thinking_tokens=(usage.get("output_token_details") or {}).get("reasoning", 0),
+        cached_tokens=(usage.get("input_token_details") or {}).get("cache_read", 0),
+        **extra,
+    )
+
+
 _CATEGORY_LIST = "\n".join(
     f"- {name}: {desc}" for name, desc in CATEGORY_DESCRIPTIONS.items()
 )
@@ -208,12 +225,14 @@ def supervisor_node(state: AgentState):
     #     if state.get("critique_rounds") else []
     # )
     retry_cue = []
-    choice = invoke_llm(
+    result = invoke_llm(
         lambda key: ChatGoogleGenerativeAI(
             model=MODEL, google_api_key=key, reasoning_effort="low"
-        ).with_structured_output(CategoryChoice),
+        ).with_structured_output(CategoryChoice, include_raw=True),
         _end_on_user_turn([_supervisor_system()] + state["messages"] + retry_cue),
     )
+    choice = result["parsed"]
+    _log_usage("supervisor", result["raw"])
     valid = [c for c in choice.categories if c in CATEGORY_REGISTRY]
     emit(
         "node_end",
@@ -274,6 +293,7 @@ def run_category_node(state: AgentState):
             _end_on_user_turn([system] + state["messages"] + local),
         )
         local.append(response)
+        _log_usage("run_category", response, category=category, round=rounds)
         if not response.tool_calls:
             break
         for tc in response.tool_calls:
@@ -346,7 +366,9 @@ def personality_node(state: AgentState):
 
     emit("node_start", node="personality")
     t0 = time.monotonic()
-    full_text = _chunk_text(invoke_llm(_llm, context))
+    response = invoke_llm(_llm, context)
+    _log_usage("personality", response)
+    full_text = _chunk_text(response)
 
     if not full_text.strip():
         full_text = "Sorry, I didn't quite catch that - could you rephrase?"
