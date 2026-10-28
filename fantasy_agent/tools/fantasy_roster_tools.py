@@ -6,17 +6,21 @@ from datetime import datetime
 from langchain_core.tools import tool
 from rapidfuzz import fuzz, process
 
-from ..clients.espn_fantasy_client import league_singleton, slot_label
+from ..clients.espn_fantasy_client import current_team_context, league_singleton, slot_label
 
 
 @tool
 def get_team_roster(team_name: str) -> str:
     """Get the fantasy roster for one of your league's teams. team_name can
     be a partial match, e.g. 'Cowboys' or part of the manager's team name,
-    and typos are tolerated via fuzzy matching."""
+    and typos are tolerated via fuzzy matching. Leave blank for your own team."""
+    if not team_name.strip():
+        team_name = current_team_context.get() or ""
     league = league_singleton()
-    # Substring match first, then fall back to fuzzy matching on team names.
     q = team_name.strip().lower()
+    if not q:
+        return "No team specified and no team context is set for this conversation."
+    # Substring match first, then fall back to fuzzy matching on team names.
     team = next((t for t in league.teams if q in t.team_name.lower()), None)
     if team is None:
         names = [t.team_name.lower() for t in league.teams]
