@@ -21,7 +21,7 @@ from fantasy_agent.clients.espn_fantasy_client import current_team_context
 
 TRACE_TRUNCATE = 800
 
-MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.7-flash")
+MODEL = os.environ.get("FANTASY_AGENT_MODEL", "gemini-3.8-flash")
 MAX_TOOL_ROUNDS = 5
 
 API_KEY = os.environ.get("GOOGLE_API_KEY")
