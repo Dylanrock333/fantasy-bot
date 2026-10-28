@@ -36,8 +36,9 @@ _MODULES = {
     "nfl_game": nfl_game_tools,
 }
 
-CATEGORY_REGISTRY = {name: mod.TOOLS for name, mod in _MODULES.items()}
-
-# Each tool module's docstring is sent to the supervisor as its category description,
-# so keep those docstrings accurate - they are functional, not just documentation.
-CATEGORY_DESCRIPTIONS = {name: mod.__doc__.strip() for name, mod in _MODULES.items()}
+CATEGORY_REGISTRY = {}
+CATEGORY_DESCRIPTIONS = {}
+for name, mod in _MODULES.items():
+    CATEGORY_REGISTRY[name] = mod.TOOLS
+    # Sent to the supervisor as the category description, so keep docstrings
+    CATEGORY_DESCRIPTIONS[name] = mod.__doc__.strip()
