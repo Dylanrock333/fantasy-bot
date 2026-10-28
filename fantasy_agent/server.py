@@ -46,14 +46,9 @@ matchup_preview_graph = build_matchup_preview_graph()
 class ChatRequest(BaseModel):
     message: str
     league_id: int
-    # Optional - set when the Discord caller is linked to a fantasy team (see
-    # the-fantasy-zone-discord's user_teams table). Any field declared here that the client
-    # sends reaches the graph; one not declared (like session_id above) is silently dropped by
-    # Pydantic instead of erroring, so team_id/espn_owner_id are declared even though only
-    # team_name is read today (via current_team_context), to avoid that trap later.
-    team_id: int | None = None
+    # team_id: int | None = None
     team_name: str | None = None
-    espn_owner_id: str | None = None
+    # espn_owner_id: str | None = None
 
 
 # Run the chat graph and return the final reply text.
