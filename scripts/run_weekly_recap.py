@@ -1,7 +1,7 @@
 """Manual trigger for the weekly recap graph, no HTTP server needed.
 
 Usage:
-  python scripts/run_weekly_recap.py --league-id 1992397255 [--week 3]
+  python scripts/run_weekly_recap.py --league-id 123456789 [--week 3]
 """
 import argparse
 import sys

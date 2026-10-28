@@ -15,7 +15,7 @@ changes.
 from espn_api.football import League
 
 league = League(
-    league_id=1992397255,
+    league_id=123456789,
     year=2026,
     espn_s2="...",   # required for private leagues
     swid="...",      # required for private leagues

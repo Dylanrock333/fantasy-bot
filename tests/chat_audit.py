@@ -2,6 +2,7 @@
 
 Usage: python tests/chat_audit.py
 """
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,8 +21,8 @@ from fantasy_agent.graphs import graph as graph_module
 from fantasy_agent.graphs.graph import build_graph
 from fantasy_agent.clients.espn_fantasy_client import current_league_id, current_team_context
 
-current_league_id.set(1992397255)
-current_team_context.set("Rams to Riches 💵")
+current_league_id.set(int(os.environ["LEAGUE_ID"]))
+current_team_context.set(os.environ["TEAM_CONTEXT"])
 
 PROMPTS = [
     "Who has the better defense, Vikings or Jaguars?",
