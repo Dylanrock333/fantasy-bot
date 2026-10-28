@@ -21,7 +21,7 @@ from fantasy_agent.graphs.graph import build_graph
 from fantasy_agent.clients.espn_fantasy_client import current_league_id, current_team_context
 
 current_league_id.set(1992397255)
-current_team_context.set("Brotherhood of the Gridiron")
+current_team_context.set("Rams to Riches 💵")
 
 PROMPTS = [
     "Who has the better defense, Vikings or Jaguars?",
@@ -32,7 +32,12 @@ PROMPTS = [
     "As of right now which flex player has the most points this week",
     "Okay between Flok, Bass, pinero, Boswell, and McLaughlin who is going to have the best chance of having the most points. This week based off the team how often they make it to field goal range and how accurate the kicker is",
     "What is the best player i can trade Jordan love to for a RB2 and WR2",
-    "What do you think about this trade AJ Brown and Cook for olave and tuten"
+    "What do you think about this trade AJ Brown and Cook for olave and tuten",
+    "who should i pick up off waivers this week at wr",
+    "is anyone on my team on a bye this week",
+    "where do i stand in the standings rn, am i making the playoffs",
+    "jaylen warren or rachaad white this week, who do i start",
+    "give me a recap of how my matchup went last week"
 ]
 
 
@@ -56,16 +61,60 @@ def run_one(graph, prompt: str) -> str:
 
     reply = result["messages"][-1].text
 
-    # Summarize supervisor decisions and tool traffic from the captured events.
+    # Summarize the full node-by-node flow from the captured events.
+    # run_category instances for one supervisor round execute in parallel, so their tool_call/
+    # tool_result events arrive interleaved across categories - buffer them by category and round,
+    # then flush as grouped blocks once that round's categories all finish (at the personality step).
     lines = [f"## {prompt}", ""]
+    supervisor_round = 0
+    category_order = []
+    category_rounds = {}  # category -> {round: [line, ...]}
+    category_done = {}  # category -> done summary line
+
+    def flush_categories():
+        for cat in category_order:
+            lines.append(f"**[{cat}]**")
+            for rnd in sorted(category_rounds[cat]):
+                lines.append(f"- **round {rnd}:**")
+                lines.extend(f"  - {l}" for l in category_rounds[cat][rnd])
+            if cat in category_done:
+                lines.append(f"- {category_done[cat]}")
+        category_order.clear()
+        category_rounds.clear()
+        category_done.clear()
+
     for e in events:
-        if e["type"] == "node_end" and e.get("node") == "supervisor":
+        node = e.get("node")
+        if e["type"] == "node_end" and node == "supervisor":
+            supervisor_round += 1
+            lines.append(f"**[supervisor round {supervisor_round}]** ({e.get('duration_ms') / 1000:.1f}s)")
             lines.append(f"- categories: {e.get('categories')}")
             lines.append(f"- reasoning: {e.get('reasoning')}")
-        elif e["type"] == "tool_call":
-            lines.append(f"- tool_call [{e.get('category')}] {e.get('name')}({e.get('args')})")
-        elif e["type"] == "tool_result":
-            lines.append(f"- tool_result [{e.get('category')}] {e.get('name')}: {e.get('result')}")
+        elif e["type"] in ("tool_call", "tool_result"):
+            cat = e.get("category")
+            if cat not in category_rounds:
+                category_order.append(cat)
+                category_rounds[cat] = {}
+            rnd = e.get("round", 0)
+            if e["type"] == "tool_call":
+                line = f"tool_call {e.get('name')}({e.get('args')})"
+            else:
+                line = f"tool_result {e.get('name')}: {e.get('result')}"
+            category_rounds[cat].setdefault(rnd, []).append(line)
+        elif e["type"] == "node_end" and node == "run_category":
+            cat = e.get("category")
+            category_done[cat] = (
+                f"done in {e.get('duration_ms') / 1000:.1f}s, {e.get('tool_rounds')} tool round(s)"
+            )
+        elif e["type"] == "node_end" and node == "personality":
+            flush_categories()
+            lines.append(f"**[personality]** ({e.get('duration_ms') / 1000:.1f}s)")
+        # critique node disabled in graph.py, so this never fires currently.
+        # elif e["type"] == "node_end" and node == "critique":
+        #     verdict = "satisfied" if e.get("satisfied") else "NOT satisfied -> looping back to supervisor"
+        #     lines.append(f"**[critique]** ({e.get('duration_ms')}ms) {verdict}")
+        #     if e.get("missing"):
+        #         lines.append(f"- missing: {e.get('missing')}")
 
     flags = []
     if "https://" in reply or "http://" in reply:
