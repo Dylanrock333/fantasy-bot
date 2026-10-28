@@ -1,7 +1,7 @@
 """Chat agent graph: supervisor picks data categories, run_category gathers tool data in parallel,
-personality writes the reply, critique may loop back once.
+personality writes the reply. Critique node is disabled (see build_graph).
 
-    START -> supervisor -> Send(run_category) x N -> personality -> critique -> (supervisor | END)
+    START -> supervisor -> Send(run_category) x N -> personality -> END
 """
 import os
 import time
@@ -36,7 +36,7 @@ _CATEGORY_LIST = "\n".join(
     f"- {name}: {desc}" for name, desc in CATEGORY_DESCRIPTIONS.items()
 )
 
-MAX_CRITIQUE_ROUNDS = 1
+# MAX_CRITIQUE_ROUNDS = 1  # unused while critique node is disabled
 
 
 def _today() -> str:
@@ -174,40 +174,40 @@ class CategoryChoice(BaseModel):
 
 
 # Shared graph state; `category` is set per parallel run_category instance.
-class AgentState(MessagesState):
+class  AgentState(MessagesState):
     categories: List[str]
     category: str
     reasoning: str
-    critique_rounds: int
-    critique_satisfied: bool
+    # critique_rounds: int  # unused while critique node is disabled
+    # critique_satisfied: bool  # unused while critique node is disabled
 
 
-# Critique structured output; `missing` becomes the supervisor's next plan.
-class Critique(BaseModel):
-    satisfied: bool = Field(
-        description="True if the final reply already fully and accurately "
-        "answers the user's question using the data gathered so far.",
-    )
-    missing: str = Field(
-        default="",
-        description="If not satisfied, what additional data/angle is "
-        "missing - fed back to the supervisor as its new plan.",
-    )
+# class Critique(BaseModel):
+#     satisfied: bool = Field(
+#         description="True if the final reply already fully and accurately "
+#         "answers the user's question using the data gathered so far.",
+#     )
+#     missing: str = Field(
+#         default="",
+#         description="If not satisfied, what additional data/angle is "
+#         "missing - fed back to the supervisor as its new plan.",
+#     )
 
 
 def supervisor_node(state: AgentState):
     """Classify the latest message into valid data categories plus a plan."""
     emit("node_start", node="supervisor")
     t0 = time.monotonic()
-    # On a critique loop-back, feed the missing-data note in as the new plan.
-    retry_cue = (
-        [HumanMessage(content=(
-            "Your previous answer wasn't fully satisfactory - here's what's still "
-            f"missing: {state['reasoning']}. Replan: pick the data categories needed "
-            "to cover that."
-        ))]
-        if state.get("critique_rounds") else []
-    )
+    # Critique loop-back disabled
+    # retry_cue = (
+    #     [HumanMessage(content=(
+    #         "Your previous answer wasn't fully satisfactory - here's what's still "
+    #         f"missing: {state['reasoning']}. Replan: pick the data categories needed "
+    #         "to cover that."
+    #     ))]
+    #     if state.get("critique_rounds") else []
+    # )
+    retry_cue = []
     choice = invoke_llm(
         lambda key: ChatGoogleGenerativeAI(
             model=MODEL, google_api_key=key, reasoning_effort="low"
@@ -361,45 +361,45 @@ def personality_node(state: AgentState):
     return {"messages": [response]}
 
 
-def critique_node(state: AgentState):
-    """Judge whether the reply needs more data; if so, store what is missing as the new plan."""
-    emit("node_start", node="critique")
-    t0 = time.monotonic()
-    result = invoke_llm(
-        lambda key: ChatGoogleGenerativeAI(
-            model=MODEL, google_api_key=key, reasoning_effort="low"
-        ).with_structured_output(Critique),
-        [SystemMessage(content=(
-            "You are a strict reviewer for a fantasy football chat bot. "
-            "Given the conversation, the tool data gathered, and the reply "
-            "just written, decide whether the reply fully and accurately "
-            "answers the user's question using only that gathered data. "
-            "Only flag it unsatisfied if pulling more data would "
-            "meaningfully change or improve the answer - never for style, "
-            "tone, or length."
-        ))] + state["messages"] + [HumanMessage(
-            content="Review the reply above now, per your instructions."
-        )],
-    )
-    emit(
-        "node_end", node="critique",
-        duration_ms=int((time.monotonic() - t0) * 1000),
-        satisfied=result.satisfied, missing=result.missing,
-    )
-    return {
-        "critique_rounds": state.get("critique_rounds", 0) + 1,
-        "critique_satisfied": result.satisfied,
-        "reasoning": result.missing or state.get("reasoning", ""),
-    }
+# def critique_node(state: AgentState):
+#     """Judge whether the reply needs more data; if so, store what is missing as the new plan."""
+#     emit("node_start", node="critique")
+#     t0 = time.monotonic()
+#     result = invoke_llm(
+#         lambda key: ChatGoogleGenerativeAI(
+#             model=MODEL, google_api_key=key, reasoning_effort="low"
+#         ).with_structured_output(Critique),
+#         [SystemMessage(content=(
+#             "You are a strict reviewer for a fantasy football chat bot. "
+#             "Given the conversation, the tool data gathered, and the reply "
+#             "just written, decide whether the reply fully and accurately "
+#             "answers the user's question using only that gathered data. "
+#             "Only flag it unsatisfied if pulling more data would "
+#             "meaningfully change or improve the answer - never for style, "
+#             "tone, or length."
+#         ))] + state["messages"] + [HumanMessage(
+#             content="Review the reply above now, per your instructions."
+#         )],
+#     )
+#     emit(
+#         "node_end", node="critique",
+#         duration_ms=int((time.monotonic() - t0) * 1000),
+#         satisfied=result.satisfied, missing=result.missing,
+#     )
+#     return {
+#         "critique_rounds": state.get("critique_rounds", 0) + 1,
+#         "critique_satisfied": result.satisfied,
+#         "reasoning": result.missing or state.get("reasoning", ""),
+#     }
 
 
-def route_after_critique(state: AgentState):
-    """End if satisfied or out of critique rounds, else loop back to the supervisor."""
-    if state.get("critique_satisfied", True):
-        return END
-    if state.get("critique_rounds", 0) > MAX_CRITIQUE_ROUNDS:
-        return END
-    return "supervisor"
+# def route_after_critique(state: AgentState):
+#     """End if satisfied or out of critique rounds, else loop back to the supervisor."""
+#     if state.get("critique_satisfied", True):
+#         return END
+#     if state.get("critique_rounds", 0) > MAX_CRITIQUE_ROUNDS:
+#         return END
+#     return "supervisor"
 
 
 def build_graph():
@@ -408,16 +408,18 @@ def build_graph():
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("run_category", run_category_node)
     graph.add_node("personality", personality_node)
-    graph.add_node("critique", critique_node)
+    # critique node disabled
+    # graph.add_node("critique", critique_node)
 
     graph.add_edge(START, "supervisor")
     graph.add_conditional_edges(
         "supervisor", route_to_categories, ["run_category", "personality"]
     )
     graph.add_edge("run_category", "personality")
-    graph.add_edge("personality", "critique")
-    graph.add_conditional_edges(
-        "critique", route_after_critique, ["supervisor", END]
-    )
+    graph.add_edge("personality", END)
+    # graph.add_edge("personality", "critique")
+    # graph.add_conditional_edges(
+    #     "critique", route_after_critique, ["supervisor", END]
+    # )
 
     return graph.compile()
