@@ -20,11 +20,13 @@ from ..clients.espn_nfl_client import (
 
 @tool
 def get_nfl_players_summary(player_names: list[str]) -> str:
-    """Get season stats summaries for one or more real-NFL players in a
-    single call - no pro_team needed, searches all 32 rosters. Prefer this
-    over get_nfl_player_summary whenever you need more than one player
-    (e.g. comparing several kickers): pass all their names in one list
-    instead of calling the single-player tool repeatedly."""
+    """Get CURRENT-SEASON TOTALS ONLY for one or more real-NFL players in a
+    single call - no pro_team needed, searches all 32 rosters. Returns the
+    same season-totals data as get_nfl_player_stats(view='summary'), just
+    batched. Use this whenever you need more than one player (e.g. comparing
+    several runningbacks), or a single player when only season totals matter.
+    Cannot return game-by-game logs, career history, or home/away splits -
+    for any of those, use get_nfl_player_stats instead."""
     matches = resolve_players_anywhere(player_names)
     lines = []
     for name, hit in matches.items():
@@ -145,13 +147,22 @@ _VIEWS = {
 def get_nfl_player_stats(
     player_name: str, pro_team: str = "", view: str = "summary", num_games: int = 5
 ) -> str:
-    """Get a real-NFL player's stats. pro_team is optional - pass the
+    """Get ONE real-NFL player's stats, in one of four distinct views - pick
+    the view that matches what's actually needed, don't call this multiple
+    times for views you don't need. pro_team is optional - pass the
     player's real NFL team abbreviation or name (e.g. 'DAL' or 'Cowboys')
     if you already know it, for a faster exact lookup; leave it blank to
-    search by name alone. view selects what to return: 'summary' (season
-    stat totals, default), 'career' (career stats by category, most recent
-    season first), 'gamelog' (last num_games games, most recent first), or
-    'splits' (season splits, e.g. All/Home/Away)."""
+    search by name alone. view selects what to return:
+    - 'summary' (default): current-season totals only - same data as
+      get_nfl_players_summary, but for a single player. Prefer
+      get_nfl_players_summary instead if you need more than one player.
+    - 'career': career stats by category, one line per season, most recent
+      season first. Not available from get_nfl_players_summary.
+    - 'gamelog': the last num_games individual games, most recent first,
+      with per-game stat lines and opponent/result. Not available from
+      get_nfl_players_summary.
+    - 'splits': season splits (e.g. All/Home/Away) as separate stat lines.
+      Not available from get_nfl_players_summary."""
     athlete = resolve_athlete(pro_team, player_name)
     if athlete is None:
         suffix = f" on team '{pro_team}'" if pro_team else ""
