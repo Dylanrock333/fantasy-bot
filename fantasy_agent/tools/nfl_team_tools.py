@@ -6,6 +6,13 @@ from langchain_core.tools import tool
 
 from ..clients.espn_nfl_client import SITE_API, get_json, resolve_team
 
+MAX_TEAMS_PER_CALL = 32
+
+
+def _dedupe(team_names: list[str]) -> list[str]:
+    """Unique team names, order preserved, capped so a bad call can't fan out unbounded."""
+    return list(dict.fromkeys(team_names))[:MAX_TEAMS_PER_CALL]
+
 
 @tool
 def get_nfl_teams() -> str:
@@ -18,9 +25,7 @@ def get_nfl_teams() -> str:
     return "NFL teams:\n" + "\n".join(lines)
 
 
-@tool
-def get_team_info(team_name: str) -> str:
-    """Get a real-NFL team's profile: current record, conference/division, and franchise info, e.g. team_name='Cowboys' or 'DAL'."""
+def _team_info_one(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
@@ -39,13 +44,14 @@ def get_team_info(team_name: str) -> str:
 
 
 @tool
-def get_team_stats(team_name: str) -> str:
-    """Get a real-NFL team's season offensive and defensive statistics -
-    points scored, total/passing/rushing yards on offense, and defensive
-    production (sacks, tackles for loss, interceptions, passes defended,
-    forced/recovered fumbles). Use this (not get_team_info, which is
-    record/venue only) to compare two teams' offense or defense, e.g.
-    team_name='Cowboys' or 'DAL'."""
+def get_team_info(team_names: list[str]) -> str:
+    """Get one or more real-NFL teams' profiles: current record,
+    conference/division, and franchise info. Pass every team you need in
+    one call, e.g. team_names=['Cowboys', 'DAL', 'Eagles']."""
+    return "\n\n".join(_team_info_one(t) for t in _dedupe(team_names))
+
+
+def _team_stats_one(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
@@ -90,8 +96,17 @@ def get_team_stats(team_name: str) -> str:
 
 
 @tool
-def get_team_coach(team_name: str) -> str:
-    """Get a real-NFL team's current head coach, e.g. team_name='Cowboys' or 'DAL'. Use this instead of assuming/recalling a coach's name from memory - coaching staffs change year to year."""
+def get_team_stats(team_names: list[str]) -> str:
+    """Get one or more real-NFL teams' season offensive and defensive
+    statistics - points scored, total/passing/rushing yards on offense,
+    and defensive production (sacks, tackles for loss, interceptions,
+    passes defended, forced/recovered fumbles). Use this (not get_team_info,
+    which is record/venue only) to compare teams' offense or defense - pass
+    every team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_team_stats_one(t) for t in _dedupe(team_names))
+
+
+def _team_coach_one(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
@@ -104,8 +119,15 @@ def get_team_coach(team_name: str) -> str:
 
 
 @tool
-def get_nfl_team_roster(team_name: str) -> str:
-    """Get a real-NFL team's full active roster grouped by position, e.g. team_name='Cowboys' or 'DAL'."""
+def get_team_coach(team_names: list[str]) -> str:
+    """Get one or more real-NFL teams' current head coach. Use this instead
+    of assuming/recalling a coach's name from memory - coaching staffs
+    change year to year. Pass every team you need in one call, e.g.
+    team_names=['Cowboys', 'DAL']."""
+    return "\n".join(_team_coach_one(t) for t in _dedupe(team_names))
+
+
+def _team_roster_one(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
@@ -121,8 +143,14 @@ def get_nfl_team_roster(team_name: str) -> str:
 
 
 @tool
-def get_team_schedule(team_name: str) -> str:
-    """Get a real-NFL team's season schedule (past results and upcoming games), e.g. team_name='Cowboys' or 'DAL'."""
+def get_nfl_team_roster(team_names: list[str]) -> str:
+    """Get one or more real-NFL teams' full active roster grouped by
+    position. Pass every team you need in one call, e.g.
+    team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_team_roster_one(t) for t in _dedupe(team_names))
+
+
+def _team_schedule_one(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
@@ -132,6 +160,14 @@ def get_team_schedule(team_name: str) -> str:
         return f"No schedule available for the {team['displayName']}."
     lines = [f"{e['date'][:10]} - {e['shortName']}" for e in events]
     return f"{team['displayName']} schedule:\n" + "\n".join(lines)
+
+
+@tool
+def get_team_schedule(team_names: list[str]) -> str:
+    """Get one or more real-NFL teams' season schedule (past results and
+    upcoming games). Pass every team you need in one call, e.g.
+    team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_team_schedule_one(t) for t in _dedupe(team_names))
 
 
 @tool
@@ -181,9 +217,7 @@ def get_league_injury_report() -> str:
     return "NFL injury report:\n" + "\n".join(lines)
 
 
-@tool
-def get_team_injuries(team_name: str) -> str:
-    """Get the real-NFL injury report for one team, e.g. 'Cowboys' or 'DAL'."""
+def _team_injuries_one(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
@@ -196,8 +230,13 @@ def get_team_injuries(team_name: str) -> str:
 
 
 @tool
-def get_team_depth_chart(team_name: str) -> str:
-    """Get the real-NFL depth chart (starters by position) for one team."""
+def get_team_injuries(team_names: list[str]) -> str:
+    """Get the real-NFL injury report for one or more teams. Pass every
+    team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_team_injuries_one(t) for t in _dedupe(team_names))
+
+
+def _team_depth_chart_one(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
@@ -212,6 +251,14 @@ def get_team_depth_chart(team_name: str) -> str:
         if lines:
             sections.append(f"{formation['name']}:\n" + "\n".join(lines))
     return f"{team['displayName']} depth chart:\n\n" + "\n\n".join(sections)
+
+
+@tool
+def get_team_depth_chart(team_names: list[str]) -> str:
+    """Get the real-NFL depth chart (starters by position) for one or more
+    teams. Pass every team you need in one call, e.g.
+    team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_team_depth_chart_one(t) for t in _dedupe(team_names))
 
 
 TOOLS = [

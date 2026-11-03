@@ -6,12 +6,15 @@ from langchain_core.tools import tool
 
 from ..clients.espn_nfl_client import CDN_API, CORE_API, get_json, resolve_event
 
+MAX_TEAMS_PER_CALL = 32
 
-@tool
-def get_game_result(team_name: str, week: int = 0) -> str:
-    """Get the real-NFL score, status, and top team stats for one team's
-    game in a given week (defaults to current week). team_name e.g.
-    'Cowboys' or 'DAL'."""
+
+def _dedupe(team_names: list[str]) -> list[str]:
+    """Unique team names, order preserved, capped so a bad call can't fan out unbounded."""
+    return list(dict.fromkeys(team_names))[:MAX_TEAMS_PER_CALL]
+
+
+def _game_result_one(team_name: str, week: int) -> str:
     event_id = resolve_event(team_name, week)
     if event_id is None:
         return f"No game found for '{team_name}'" + (f" in week {week}." if week else ".")
@@ -34,10 +37,14 @@ def get_game_result(team_name: str, week: int = 0) -> str:
 
 
 @tool
-def get_game_key_plays(team_name: str, week: int = 0) -> str:
-    """Get the scoring plays (touchdowns, field goals, etc.) from one
-    team's game in a given week (defaults to current week). team_name e.g.
-    'Cowboys' or 'DAL'."""
+def get_game_result(team_names: list[str], week: int = 0) -> str:
+    """Get the real-NFL score, status, and top team stats for one or more
+    teams' games in a given week (defaults to current week). Pass every
+    team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_game_result_one(t, week) for t in _dedupe(team_names))
+
+
+def _game_key_plays_one(team_name: str, week: int) -> str:
     event_id = resolve_event(team_name, week)
     if event_id is None:
         return f"No game found for '{team_name}'" + (f" in week {week}." if week else ".")
@@ -46,21 +53,25 @@ def get_game_key_plays(team_name: str, week: int = 0) -> str:
     pkg = data.get("gamepackageJSON", data)
     plays = pkg.get("scoringPlays", [])
     if not plays:
-        return "No scoring plays yet."
+        return f"No scoring plays yet for '{team_name}'."
 
     lines = [
         f"Q{p['period']['number']} {p['clock']['displayValue']} - "
         f"{p['team']['displayName']} {p['scoringType']['displayName']}: {p['text']}"
         for p in plays
     ]
-    return "\n".join(lines)
+    return f"{team_name}:\n" + "\n".join(lines)
 
 
 @tool
-def get_game_odds(team_name: str, week: int = 0) -> str:
-    """Get the betting odds (spread, moneyline, over/under) for one team's
-    game in a given week (defaults to current week). team_name e.g.
-    'Cowboys' or 'DAL'."""
+def get_game_key_plays(team_names: list[str], week: int = 0) -> str:
+    """Get the scoring plays (touchdowns, field goals, etc.) from one or
+    more teams' games in a given week (defaults to current week). Pass
+    every team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_game_key_plays_one(t, week) for t in _dedupe(team_names))
+
+
+def _game_odds_one(team_name: str, week: int) -> str:
     event_id = resolve_event(team_name, week)
     if event_id is None:
         return f"No game found for '{team_name}'" + (f" in week {week}." if week else ".")
@@ -68,20 +79,24 @@ def get_game_odds(team_name: str, week: int = 0) -> str:
     data = get_json(f"{CORE_API}/events/{event_id}/competitions/{event_id}/odds")
     items = data.get("items", [])
     if not items:
-        return "No odds available for this game."
+        return f"No odds available for '{team_name}''s game."
 
     lines = [
         f"{o['provider']['name']}: {o['details']}, O/U {o['overUnder']}"
         for o in items
     ]
-    return "Odds:\n" + "\n".join(lines)
+    return f"{team_name} odds:\n" + "\n".join(lines)
 
 
 @tool
-def get_game_broadcast(team_name: str, week: int = 0) -> str:
-    """Get the TV/streaming broadcast info (network, market) for one team's
-    game in a given week (defaults to current week). team_name e.g.
-    'Cowboys' or 'DAL'."""
+def get_game_odds(team_names: list[str], week: int = 0) -> str:
+    """Get the betting odds (spread, moneyline, over/under) for one or more
+    teams' games in a given week (defaults to current week). Pass every
+    team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_game_odds_one(t, week) for t in _dedupe(team_names))
+
+
+def _game_broadcast_one(team_name: str, week: int) -> str:
     event_id = resolve_event(team_name, week)
     if event_id is None:
         return f"No game found for '{team_name}'" + (f" in week {week}." if week else ".")
@@ -89,21 +104,25 @@ def get_game_broadcast(team_name: str, week: int = 0) -> str:
     data = get_json(f"{CORE_API}/events/{event_id}/competitions/{event_id}/broadcasts")
     items = data.get("items", [])
     if not items:
-        return "No broadcast info available for this game."
+        return f"No broadcast info available for '{team_name}''s game."
 
     lines = [
         f"{b.get('station') or b.get('media', {}).get('name', 'Unknown')} "
         f"({b['type']['longName']}, {b['market']['type']})"
         for b in items
     ]
-    return "Broadcasts:\n" + "\n".join(lines)
+    return f"{team_name} broadcasts:\n" + "\n".join(lines)
 
 
 @tool
-def get_game_officials(team_name: str, week: int = 0) -> str:
-    """Get the officiating crew (referee, umpire, etc.) assigned to one
-    team's game in a given week (defaults to current week). team_name e.g.
-    'Cowboys' or 'DAL'."""
+def get_game_broadcast(team_names: list[str], week: int = 0) -> str:
+    """Get the TV/streaming broadcast info (network, market) for one or
+    more teams' games in a given week (defaults to current week). Pass
+    every team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_game_broadcast_one(t, week) for t in _dedupe(team_names))
+
+
+def _game_officials_one(team_name: str, week: int) -> str:
     event_id = resolve_event(team_name, week)
     if event_id is None:
         return f"No game found for '{team_name}'" + (f" in week {week}." if week else ".")
@@ -111,17 +130,21 @@ def get_game_officials(team_name: str, week: int = 0) -> str:
     data = get_json(f"{CORE_API}/events/{event_id}/competitions/{event_id}/officials")
     items = sorted(data.get("items", []), key=lambda o: o.get("order", 0))
     if not items:
-        return "No officiating crew info available for this game."
+        return f"No officiating crew info available for '{team_name}''s game."
 
     lines = [f"{o['position']['displayName']}: {o['fullName']}" for o in items]
-    return "Officials:\n" + "\n".join(lines)
+    return f"{team_name} officials:\n" + "\n".join(lines)
 
 
 @tool
-def get_game_leaders(team_name: str, week: int = 0) -> str:
-    """Get each team's statistical leaders (passing/rushing/receiving
-    yards, sacks, tackles) for one team's game in a given week (defaults to
-    current week). team_name e.g. 'Cowboys' or 'DAL'."""
+def get_game_officials(team_names: list[str], week: int = 0) -> str:
+    """Get the officiating crew (referee, umpire, etc.) assigned to one or
+    more teams' games in a given week (defaults to current week). Pass
+    every team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_game_officials_one(t, week) for t in _dedupe(team_names))
+
+
+def _game_leaders_one(team_name: str, week: int) -> str:
     event_id = resolve_event(team_name, week)
     if event_id is None:
         return f"No game found for '{team_name}'" + (f" in week {week}." if week else ".")
@@ -130,7 +153,7 @@ def get_game_leaders(team_name: str, week: int = 0) -> str:
     pkg = data.get("gamepackageJSON", data)
     team_leaders = pkg.get("leaders", [])
     if not team_leaders:
-        return "No leader stats available for this game."
+        return f"No leader stats available for '{team_name}''s game."
 
     lines = []
     for entry in team_leaders:
@@ -140,6 +163,15 @@ def get_game_leaders(team_name: str, week: int = 0) -> str:
             athlete = leader.get("athlete", {}).get("displayName", "Unknown")
             lines.append(f"  {cat['displayName']}: {athlete} - {leader.get('displayValue', '')}")
     return "\n".join(lines)
+
+
+@tool
+def get_game_leaders(team_names: list[str], week: int = 0) -> str:
+    """Get each team's statistical leaders (passing/rushing/receiving
+    yards, sacks, tackles) for one or more teams' games in a given week
+    (defaults to current week). Pass every team you need in one call, e.g.
+    team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_game_leaders_one(t, week) for t in _dedupe(team_names))
 
 
 TOOLS = [

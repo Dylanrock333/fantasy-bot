@@ -113,6 +113,55 @@ def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
     return search_athlete(player_name)
 
 
+def _ensure_all_rosters() -> None:
+    """Fill _roster_cache for every team (idempotent)."""
+    global _team_cache
+    if _team_cache is None:
+        resolve_team("")  # populates _team_cache as a side effect
+    for team in _team_cache:
+        team_id = team["id"]
+        if team_id not in _roster_cache:
+            roster = get_json(f"{SITE_API}/teams/{team_id}/roster")
+            _roster_cache[team_id] = [
+                p for group in roster.get("athletes", []) for p in group["items"]
+            ]
+
+
+def resolve_players_anywhere(
+    player_names: list[str],
+) -> dict[str, tuple[dict, dict] | list[tuple[dict, dict]] | None]:
+    """Find each name's athlete + team across all 32 rosters in one pass, no team needed.
+
+    A handful of real players share an exact full name across two teams
+    (e.g. two NFL players named "Justin Jefferson") - silently picking one
+    would risk returning the wrong person's stats, so an exact name with
+    more than one roster hit is returned as a list instead of guessing."""
+    _ensure_all_rosters()
+    all_players = [
+        (p, team)
+        for team in _team_cache
+        for p in _roster_cache[team["id"]]
+    ]
+    all_names = [p["fullName"].lower() for p, _ in all_players]
+
+    results: dict[str, tuple[dict, dict] | list[tuple[dict, dict]] | None] = {}
+    for name in player_names:
+        q = name.strip().lower()
+        exact = [pair for pair, n in zip(all_players, all_names) if q == n]
+        if len(exact) > 1:
+            results[name] = exact
+            continue
+        hit = exact[0] if exact else next(
+            (pair for pair, n in zip(all_players, all_names) if q in n), None
+        )
+        if hit is None:
+            match = process.extractOne(q, all_names, scorer=fuzz.WRatio, score_cutoff=80)
+            if match and q[0] == all_names[match[2]][0]:
+                hit = all_players[match[2]]
+        results[name] = hit
+    return results
+
+
 def resolve_event(pro_team: str, week: int = 0) -> str | None:
     """Find a team's game id for a week (default current) from the live, uncached scoreboard."""
     team = resolve_team(pro_team)

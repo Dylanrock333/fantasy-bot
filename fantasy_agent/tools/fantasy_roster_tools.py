@@ -9,14 +9,9 @@ from rapidfuzz import fuzz, process
 from ..clients.espn_fantasy_client import current_team_context, league_singleton, slot_label
 
 
-@tool
-def get_team_roster(team_name: str) -> str:
-    """Get the fantasy roster for one of your league's teams. team_name can
-    be a partial match, e.g. 'Cowboys' or part of the manager's team name,
-    and typos are tolerated via fuzzy matching. Leave blank for your own team."""
+def _team_roster_one(team_name: str, league) -> str:
     if not team_name.strip():
         team_name = current_team_context.get() or ""
-    league = league_singleton()
     q = team_name.strip().lower()
     if not q:
         return "No team specified and no team context is set for this conversation."
@@ -37,6 +32,18 @@ def get_team_roster(team_name: str) -> str:
              f"slot={slot_label(p.lineupSlot)}"
              for p in team.roster]
     return f"{team.team_name} roster:\n" + "\n".join(lines)
+
+
+@tool
+def get_team_roster(team_names: list[str]) -> str:
+    """Get the fantasy roster for one or more of your league's teams.
+    Each team_name can be a partial match, e.g. 'Cowboys' or part of the
+    manager's team name, and typos are tolerated via fuzzy matching. Pass
+    [''] for your own team. Pass every team you need in one call, e.g.
+    team_names=['Cowboys', 'Steelers'] instead of calling this repeatedly."""
+    league = league_singleton()
+    names = list(dict.fromkeys(team_names)) or [""]
+    return "\n\n".join(_team_roster_one(t, league) for t in names)
 
 
 @tool
