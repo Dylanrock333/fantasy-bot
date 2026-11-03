@@ -21,11 +21,7 @@ def get_free_agents(position: str = "", size: int = 10) -> str:
     return "\n".join(lines)
 
 
-@tool
-def get_player_info(name: str) -> str:
-    """Look up a single NFL player's fantasy status by name, e.g. 'Jahmyr Gibbs' or
-    "Ja'Marr Chase". Use this for a question about one named player rather than a list."""
-    league = league_singleton()
+def _player_info_one(name: str, league) -> str:
     player = league.player_info(name=name)
     if player is None:
         return f"No player found matching '{name}'."
@@ -33,6 +29,16 @@ def get_player_info(name: str) -> str:
             f"owned {player.percent_owned}%, started {player.percent_started}%, "
             f"proj {player.projected_total_points}, total {player.total_points}, "
             f"injury status {player.injuryStatus}")
+
+
+@tool
+def get_player_info(names: list[str]) -> str:
+    """Look up one or more NFL players' fantasy status by name, e.g.
+    'Jahmyr Gibbs' or "Ja'Marr Chase". Pass every player you need in one
+    call, e.g. names=['Jahmyr Gibbs', "Ja'Marr Chase"] instead of calling
+    this repeatedly."""
+    league = league_singleton()
+    return "\n".join(_player_info_one(n, league) for n in dict.fromkeys(names))
 
 
 TOOLS = [get_free_agents, get_player_info]

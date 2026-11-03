@@ -14,7 +14,44 @@ from ..clients.espn_nfl_client import (
     follow_ref,
     get_json,
     resolve_athlete,
+    resolve_players_anywhere,
 )
+
+
+@tool
+def get_nfl_players_summary(player_names: list[str]) -> str:
+    """Get season stats summaries for one or more real-NFL players in a
+    single call - no pro_team needed, searches all 32 rosters. Prefer this
+    over get_nfl_player_summary whenever you need more than one player
+    (e.g. comparing several kickers): pass all their names in one list
+    instead of calling the single-player tool repeatedly."""
+    matches = resolve_players_anywhere(player_names)
+    lines = []
+    for name, hit in matches.items():
+        if hit is None:
+            lines.append(f"{name}: no NFL player matched.")
+            continue
+        if isinstance(hit, list):
+            options = ", ".join(f"{a['fullName']} ({t['abbreviation']})" for a, t in hit)
+            lines.append(
+                f"{name}: ambiguous - multiple NFL players share this exact name "
+                f"({options}). Call get_nfl_player_summary with the right pro_team "
+                f"instead of guessing."
+            )
+            continue
+        athlete, team = hit
+        overview = get_json(f"{ATHLETE_API}/athletes/{athlete['id']}/overview")
+        stats = overview.get("statistics", {})
+        names_ = stats.get("displayNames", [])
+        splits = stats.get("splits", [])
+        season = next((s for s in splits if s["displayName"] == "Regular Season"), None)
+        if not season:
+            lines.append(f"{athlete['fullName']} ({team['abbreviation']}): no season stats yet.")
+            continue
+        pairs = list(zip(names_, season["stats"]))[:8]
+        stat_str = ", ".join(f"{n}: {v}" for n, v in pairs)
+        lines.append(f"{athlete['fullName']} ({team['abbreviation']}): {stat_str}")
+    return "\n".join(lines)
 
 
 @tool
@@ -204,6 +241,7 @@ def get_nfl_qbr_leaders(week: int = 0) -> str:
 
 
 TOOLS = [
+    get_nfl_players_summary,
     get_nfl_player_summary,
     get_nfl_player_career_stats,
     get_nfl_player_gamelog,
