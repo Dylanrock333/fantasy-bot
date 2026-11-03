@@ -149,11 +149,25 @@ def get_nfl_divisions() -> str:
     return "NFL conferences and divisions:\n" + "\n".join(lines)
 
 
+def _fetch_injury_teams() -> list[dict]:
+    """Fetch the league-wide injury report. The per-team endpoint
+    (teams/{id}/injuries) is dead and always empty, so both tools below
+    pull from this one call and filter locally."""
+    report = get_json(f"{SITE_API}/injuries")
+    return report.get("injuries", [])
+
+
+def _format_entries(entries: list[dict]) -> str:
+    return ", ".join(
+        f"{e.get('athlete', {}).get('displayName', 'Unknown')} ({e.get('status', '?')})"
+        for e in entries
+    )
+
+
 @tool
 def get_league_injury_report() -> str:
-    """Get the current real-NFL injury report across all 32 teams in one call - use this instead of get_team_injuries, whose per-team endpoint is currently dead and always empty."""
-    report = get_json(f"{SITE_API}/injuries")
-    teams = report.get("injuries", [])
+    """Get the current real-NFL injury report across all 32 teams in one call."""
+    teams = _fetch_injury_teams()
     if not teams:
         return "No injury report available."
     lines = []
@@ -161,11 +175,7 @@ def get_league_injury_report() -> str:
         entries = team.get("injuries", [])
         if not entries:
             continue
-        names = ", ".join(
-            f"{e.get('athlete', {}).get('displayName', 'Unknown')} ({e.get('status', '?')})"
-            for e in entries
-        )
-        lines.append(f"{team.get('displayName', team.get('id'))}: {names}")
+        lines.append(f"{team.get('displayName', team.get('id'))}: {_format_entries(entries)}")
     if not lines:
         return "No reported injuries league-wide."
     return "NFL injury report:\n" + "\n".join(lines)
@@ -177,11 +187,12 @@ def get_team_injuries(team_name: str) -> str:
     team = resolve_team(team_name)
     if team is None:
         return f"No NFL team matched '{team_name}'."
-    report = get_json(f"{SITE_API}/teams/{team['id']}/injuries")
-    items = report.get("items", report.get("injuries", []))
-    if not items:
+    teams = _fetch_injury_teams()
+    match = next((t for t in teams if t.get("id") == team["id"]), None)
+    entries = match.get("injuries", []) if match else []
+    if not entries:
         return f"No reported injuries for the {team['displayName']}."
-    return f"{team['displayName']} injuries: {len(items)} entries — {items}"
+    return f"{team['displayName']} injuries: {_format_entries(entries)}"
 
 
 @tool
