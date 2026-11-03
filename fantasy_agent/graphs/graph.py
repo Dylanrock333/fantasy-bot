@@ -16,6 +16,7 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from fantasy_agent.tools import CATEGORY_DESCRIPTIONS, CATEGORY_REGISTRY
+from fantasy_agent.tools.fantasy_roster_tools import get_team_roster
 from fantasy_agent.logging.trace import emit
 from fantasy_agent.clients.espn_fantasy_client import current_team_context
 
@@ -245,12 +246,33 @@ def supervisor_node(state: AgentState):
 
 
 def route_to_categories(state: AgentState):
-    """Fan out one run_category per chosen category, or skip straight to personality."""
+    """Fan out one run_category per chosen category, or skip straight to personality.
+
+    nfl_player/nfl_team otherwise get dispatched with no concrete player/team
+    named (e.g. "my RB2"), so their LLM call has nothing to call tools with and
+    just burns tokens reasoning to a no-op. Resolving the roster here is a
+    direct API call, not an LLM turn, so it's cheap to do before the fan-out.
+    """
     if not state["categories"]:
         return "personality"
+
+    entity_extra = []
+    needs_entity = {"nfl_player", "nfl_team"} & set(state["categories"])
+    if needs_entity and "fantasy_roster" in state["categories"]:
+        try:
+            roster_text = get_team_roster.invoke({"team_names": [""]})
+        except Exception:
+            roster_text = None
+        if roster_text:
+            entity_extra = [HumanMessage(content=(
+                "Context: here is the user's current fantasy roster. Use it to "
+                "resolve any reference like 'my RB2' or 'my starting WR' to the "
+                "actual player name before using your tools:\n" + roster_text
+            ))]
+
     return [
         Send("run_category", {
-            "messages": state["messages"],
+            "messages": state["messages"] + (entity_extra if c in needs_entity else []),
             "category": c,
             "reasoning": state["reasoning"],
         })
