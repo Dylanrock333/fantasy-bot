@@ -1,5 +1,7 @@
 """Real-NFL data: league news headlines, transactions, and the draft
 (ESPN's public API)."""
+from datetime import datetime, timezone
+
 from langchain_core.tools import tool
 
 from ..clients.espn_nfl_client import ATHLETE_API, SITE_API, get_json, resolve_athlete
@@ -15,6 +17,27 @@ def _best_link(articles: list[dict]) -> str | None:
     return links[0] if links else None
 
 
+def _published(article: dict) -> str:
+    """Render how long ago an article was published, so the model can judge
+    staleness instead of treating every headline as equally current."""
+    raw = article.get("published") or article.get("lastModified")
+    if not raw:
+        return ""
+    try:
+        published = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    age = datetime.now(timezone.utc) - published
+    hours = age.total_seconds() / 3600
+    if hours < 1:
+        age_str = f"{int(age.total_seconds() / 60)}m ago"
+    elif hours < 48:
+        age_str = f"{int(hours)}h ago"
+    else:
+        age_str = f"{int(hours / 24)}d ago"
+    return f" [{age_str}, {published.strftime('%Y-%m-%d %H:%M UTC')}]"
+
+
 @tool
 def get_nfl_news(limit: int = 5) -> str:
     """Get the latest real-NFL headlines."""
@@ -23,7 +46,7 @@ def get_nfl_news(limit: int = 5) -> str:
     if not articles:
         return "No news found."
     lines = [
-        f"{a['headline']}: {a.get('description', '')}".strip(": ")
+        f"{a['headline']}: {a.get('description', '')}".strip(": ") + _published(a)
         for a in articles
     ]
     top_link = _best_link(articles)
@@ -85,7 +108,7 @@ def get_player_news(player_name: str, pro_team: str, limit: int = 3) -> str:
         return f"No recent news found for {athlete['fullName']}."
 
     lines = [
-        f"{a['headline']}: {a.get('description', '')}".strip(": ")
+        f"{a['headline']}: {a.get('description', '')}".strip(": ") + _published(a)
         for a in articles
     ]
     top_link = _best_link(articles)
