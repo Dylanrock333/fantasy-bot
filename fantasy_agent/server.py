@@ -52,7 +52,7 @@ class SignupRequest(BaseModel):
     email: str
     password: str
     league_id: int
-    team_name: str
+    team_id: int
 
 
 class LoginRequest(BaseModel):
@@ -60,15 +60,28 @@ class LoginRequest(BaseModel):
     password: str
 
 
+async def _resolve_team(league_id: int, team_id: int) -> dict:
+    current_league_id.set(league_id)
+    league = await asyncio.to_thread(league_singleton)
+    for t in league.teams:
+        if t.team_id == team_id:
+            owner_id = t.owners[0]["id"] if t.owners else None
+            return {"team_name": t.team_name, "espn_owner_id": owner_id}
+    raise HTTPException(status_code=400, detail="team_id not found in that league")
+
+
 @app.post("/api/signup")
 async def signup(req: SignupRequest):
+    team = await _resolve_team(req.league_id, req.team_id)
     db = SessionLocal()
     try:
         user = User(
             email=req.email,
             password_hash=hash_password(req.password),
             league_id=req.league_id,
-            team_name=req.team_name,
+            team_id=req.team_id,
+            team_name=team["team_name"],
+            espn_owner_id=team["espn_owner_id"],
         )
         db.add(user)
         db.commit()

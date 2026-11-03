@@ -18,7 +18,9 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     password_hash = Column(String, nullable=False)
     league_id = Column(Integer, nullable=True)
+    team_id = Column(Integer, nullable=True)
     team_name = Column(String, nullable=True)
+    espn_owner_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
