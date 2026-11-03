@@ -91,16 +91,16 @@ def get_nfl_draft(limit: int = 32) -> str:
 
 
 @tool
-def get_player_news(player_name: str, pro_team: str, limit: int = 3) -> str:
+def get_player_news(player_name: str, pro_team: str = "", limit: int = 3) -> str:
     """Get the latest real-NFL news headlines specifically about one player
-    (injuries, roles, outlook), not general league news. pro_team is that
-    player's real NFL team abbreviation or name (e.g. 'DAL' or 'Cowboys') -
-    get it from the player's proTeam field in a fantasy roster tool result
-    first; this tool cannot search by name alone. Use get_nfl_news instead
-    for general league-wide headlines."""
+    (injuries, roles, outlook), not general league news. pro_team is
+    optional - pass it if already known, for a faster exact lookup; leave
+    it blank to search by name alone. Use get_nfl_news instead for general
+    league-wide headlines."""
     athlete = resolve_athlete(pro_team, player_name)
     if athlete is None:
-        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
+        suffix = f" on team '{pro_team}'" if pro_team else ""
+        return f"No NFL player matched '{player_name}'{suffix}."
 
     overview = get_json(f"{ATHLETE_API}/athletes/{athlete['id']}/overview")
     articles = overview.get("news", [])[:limit]

@@ -10,6 +10,7 @@ SITE_API_STANDINGS = "https://site.api.espn.com/apis/v2/sports/football/nfl"
 CORE_API = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
 ATHLETE_API = "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl"
 CDN_API = "https://cdn.espn.com/core/nfl"
+SEARCH_API = "https://site.web.api.espn.com/apis/search/v2"
 
 TIMEOUT = 10
 
@@ -53,36 +54,63 @@ def resolve_team(query: str) -> dict | None:
 _roster_cache: dict[str, list[dict]] = {}
 
 
+def search_athlete(player_name: str) -> dict | None:
+    """Find an NFL athlete by name alone via ESPN's cross-league search - no
+    team needed. Used as the fallback in resolve_athlete below when pro_team
+    is blank or the team-scoped roster lookup misses. Returns
+    {'id', 'fullName', 'proTeam'} or None if no player result matches."""
+    data = get_json(SEARCH_API, query=player_name, limit=5)
+    for group in data.get("results", []):
+        if group.get("type") != "player":
+            continue
+        for item in group.get("contents", []):
+            uid = item.get("uid", "")
+            athlete_id = uid.rsplit("a:", 1)[-1] if "a:" in uid else None
+            if not athlete_id:
+                continue
+            team = resolve_team(item.get("subtitle", ""))
+            return {
+                "id": athlete_id,
+                "fullName": item.get("displayName", player_name),
+                "proTeam": team["abbreviation"] if team else item.get("subtitle", "?"),
+            }
+    return None
+
+
 def resolve_athlete(pro_team: str, player_name: str) -> dict | None:
-    """Find a public-API athlete on a team's roster by name (substring, then fuzzy match).
+    """Find a public-API athlete by name (substring, then fuzzy match on a
+    team's roster). Bridges fantasy players to public athlete ids, which use
+    a different id space. pro_team may be blank - and if the team-scoped
+    lookup misses or isn't given, falls back to search_athlete (name-only,
+    cross-league)."""
+    team = resolve_team(pro_team) if pro_team else None
+    if team is not None:
+        team_id = team["id"]
+        if team_id not in _roster_cache:
+            roster = get_json(f"{SITE_API}/teams/{team_id}/roster")
+            _roster_cache[team_id] = [
+                p for group in roster.get("athletes", []) for p in group["items"]
+            ]
 
-    Bridges fantasy players to public athlete ids, which use a different id space."""
-    team = resolve_team(pro_team)
-    if team is None:
-        return None
+        q = player_name.strip().lower()
+        for p in _roster_cache[team_id]:
+            if q == p["fullName"].lower() or q in p["fullName"].lower():
+                p.setdefault("proTeam", team["abbreviation"])
+                return p
+        names = [p["fullName"].lower() for p in _roster_cache[team_id]]
+        match = process.extractOne(q, names, scorer=fuzz.WRatio, score_cutoff=80)
+        if match is not None:
+            candidate = _roster_cache[team_id][match[2]]
+            # WRatio can score two different people highly if they share a
+            # last name (e.g. "A.J. Brown" vs "Hollywood Brown") - require
+            # the first-name initial to agree too, or fall through to search.
+            if q[0] == candidate["fullName"].strip().lower()[0]:
+                candidate.setdefault("proTeam", team["abbreviation"])
+                return candidate
 
-    team_id = team["id"]
-    if team_id not in _roster_cache:
-        roster = get_json(f"{SITE_API}/teams/{team_id}/roster")
-        _roster_cache[team_id] = [
-            p for group in roster.get("athletes", []) for p in group["items"]
-        ]
-
-    q = player_name.strip().lower()
-    for p in _roster_cache[team_id]:
-        if q == p["fullName"].lower() or q in p["fullName"].lower():
-            return p
-    names = [p["fullName"].lower() for p in _roster_cache[team_id]]
-    match = process.extractOne(q, names, scorer=fuzz.WRatio, score_cutoff=80)
-    if match is None:
-        return None
-    candidate = _roster_cache[team_id][match[2]]
-    # WRatio can score two different people highly if they share a last name
-    # (e.g. "A.J. Brown" vs "Hollywood Brown") - require the first-name
-    # initial to agree too, or treat it as no match.
-    if q[0] != candidate["fullName"].strip().lower()[0]:
-        return None
-    return candidate
+    # pro_team was blank, unresolved, or just wrong for this player - search
+    # by name alone and trust its own team over whatever pro_team claimed.
+    return search_athlete(player_name)
 
 
 def resolve_event(pro_team: str, week: int = 0) -> str | None:

@@ -106,20 +106,22 @@ _VIEWS = {
 
 @tool
 def get_nfl_player_stats(
-    player_name: str, pro_team: str, view: str = "summary", num_games: int = 5
+    player_name: str, pro_team: str = "", view: str = "summary", num_games: int = 5
 ) -> str:
-    """Get a real-NFL player's stats. pro_team is that player's real NFL
-    team abbreviation or name (e.g. 'DAL' or 'Cowboys') - get it from the
-    player's proTeam field in a fantasy roster tool result first; this tool
-    cannot search by name alone. view selects what to return: 'summary'
-    (season stat totals, default), 'career' (career stats by category, most
-    recent season first), 'gamelog' (last num_games games, most recent
-    first), or 'splits' (season splits, e.g. All/Home/Away)."""
+    """Get a real-NFL player's stats. pro_team is optional - pass the
+    player's real NFL team abbreviation or name (e.g. 'DAL' or 'Cowboys')
+    if you already know it, for a faster exact lookup; leave it blank to
+    search by name alone. view selects what to return: 'summary' (season
+    stat totals, default), 'career' (career stats by category, most recent
+    season first), 'gamelog' (last num_games games, most recent first), or
+    'splits' (season splits, e.g. All/Home/Away)."""
     athlete = resolve_athlete(pro_team, player_name)
     if athlete is None:
-        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
+        suffix = f" on team '{pro_team}'" if pro_team else ""
+        return f"No NFL player matched '{player_name}'{suffix}."
+    team_label = athlete.get("proTeam") or pro_team or "?"
     fn = _VIEWS.get(view, _view_summary)
-    return fn(athlete, pro_team, num_games)
+    return fn(athlete, team_label, num_games)
 
 
 # Stat categories relevant to each position, for the position= filter below.
