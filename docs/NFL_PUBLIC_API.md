@@ -92,10 +92,10 @@ Base: `https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/`
 
 | Endpoint | Returns | Status |
 |---|---|---|
-| `athletes/{id}/overview` | Season stat highlights, next game, news, fantasy outlook | ✅ `nfl_player_tools.get_nfl_player_summary` |
-| `athletes/{id}/stats` | Season/career stats by category, with glossary | ✅ `nfl_player_tools.get_nfl_player_career_stats` |
-| `athletes/{id}/gamelog` | Game-by-game log | ✅ `nfl_player_tools.get_nfl_player_gamelog` |
-| `athletes/{id}/splits` | Home/away/opponent splits | ✅ `nfl_player_tools.get_nfl_player_splits` |
+| `athletes/{id}/overview` | Season stat highlights, next game, news, fantasy outlook | ✅ `nfl_player_tools.get_nfl_player_stats(view="summary")` |
+| `athletes/{id}/stats` | Season/career stats by category, with glossary | ✅ `nfl_player_tools.get_nfl_player_stats(view="career")` |
+| `athletes/{id}/gamelog` | Game-by-game log | ✅ `nfl_player_tools.get_nfl_player_stats(view="gamelog")` |
+| `athletes/{id}/splits` | Home/away/opponent splits | ✅ `nfl_player_tools.get_nfl_player_stats(view="splits")` |
 | `statistics/byathlete` | — | ❌ 404, doesn't exist |
 
 ## 4. CDN Game Data — `cdn.espn.com` (deep per-game internals)

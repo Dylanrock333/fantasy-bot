@@ -17,16 +17,7 @@ from ..clients.espn_nfl_client import (
 )
 
 
-@tool
-def get_nfl_player_summary(player_name: str, pro_team: str) -> str:
-    """Get a real-NFL player's season stats summary. pro_team is that
-    player's real NFL team abbreviation or name (e.g. 'DAL' or 'Cowboys') -
-    get it from the player's proTeam field in a fantasy roster tool result
-    first; this tool cannot search by name alone."""
-    athlete = resolve_athlete(pro_team, player_name)
-    if athlete is None:
-        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
-
+def _view_summary(athlete: dict, pro_team: str, num_games: int) -> str:
     overview = get_json(f"{ATHLETE_API}/athletes/{athlete['id']}/overview")
     stats = overview.get("statistics", {})
     names = stats.get("displayNames", [])
@@ -39,17 +30,7 @@ def get_nfl_player_summary(player_name: str, pro_team: str) -> str:
     return f"{athlete['fullName']} ({pro_team}) season stats:\n" + "\n".join(lines)
 
 
-@tool
-def get_nfl_player_career_stats(player_name: str, pro_team: str) -> str:
-    """Get a real-NFL player's career statistics broken out by category
-    (passing, rushing, receiving, etc.), most recent season first. pro_team
-    is that player's real NFL team abbreviation or name (e.g. 'DAL' or
-    'Cowboys') - get it from the player's proTeam field in a fantasy roster
-    tool result first; this tool cannot search by name alone."""
-    athlete = resolve_athlete(pro_team, player_name)
-    if athlete is None:
-        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
-
+def _view_career(athlete: dict, pro_team: str, num_games: int) -> str:
     data = get_json(f"{ATHLETE_API}/athletes/{athlete['id']}/stats")
     categories = data.get("categories", [])
     lines = []
@@ -67,17 +48,7 @@ def get_nfl_player_career_stats(player_name: str, pro_team: str) -> str:
     return f"{athlete['fullName']} ({pro_team}) career stats by category:\n" + "\n".join(lines)
 
 
-@tool
-def get_nfl_player_gamelog(player_name: str, pro_team: str, num_games: int = 5) -> str:
-    """Get a real-NFL player's game-by-game stat log for their most recent
-    games this season, most recent first. pro_team is that player's real NFL
-    team abbreviation or name (e.g. 'DAL' or 'Cowboys') - get it from the
-    player's proTeam field in a fantasy roster tool result first; this tool
-    cannot search by name alone."""
-    athlete = resolve_athlete(pro_team, player_name)
-    if athlete is None:
-        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
-
+def _view_gamelog(athlete: dict, pro_team: str, num_games: int) -> str:
     data = get_json(f"{ATHLETE_API}/athletes/{athlete['id']}/gamelog")
     season_types = data.get("seasonTypes", [])
     events_map = data.get("events", {})
@@ -105,17 +76,7 @@ def get_nfl_player_gamelog(player_name: str, pro_team: str, num_games: int = 5) 
     return f"{athlete['fullName']} ({pro_team}) recent games:\n" + "\n".join(lines)
 
 
-@tool
-def get_nfl_player_splits(player_name: str, pro_team: str) -> str:
-    """Get a real-NFL player's season stat splits (e.g. All/Home/Away), one
-    line per split. pro_team is that player's real NFL team abbreviation or
-    name (e.g. 'DAL' or 'Cowboys') - get it from the player's proTeam field
-    in a fantasy roster tool result first; this tool cannot search by name
-    alone."""
-    athlete = resolve_athlete(pro_team, player_name)
-    if athlete is None:
-        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
-
+def _view_splits(athlete: dict, pro_team: str, num_games: int) -> str:
     data = get_json(f"{ATHLETE_API}/athletes/{athlete['id']}/splits")
     split_categories = data.get("splitCategories", [])
     if not split_categories:
@@ -133,6 +94,32 @@ def get_nfl_player_splits(player_name: str, pro_team: str) -> str:
         lines.append(f"{s['displayName']}: {stat_str}")
     label = data.get("displayName", "Season")
     return f"{athlete['fullName']} ({pro_team}) {label} splits:\n" + "\n".join(lines)
+
+
+_VIEWS = {
+    "summary": _view_summary,
+    "career": _view_career,
+    "gamelog": _view_gamelog,
+    "splits": _view_splits,
+}
+
+
+@tool
+def get_nfl_player_stats(
+    player_name: str, pro_team: str, view: str = "summary", num_games: int = 5
+) -> str:
+    """Get a real-NFL player's stats. pro_team is that player's real NFL
+    team abbreviation or name (e.g. 'DAL' or 'Cowboys') - get it from the
+    player's proTeam field in a fantasy roster tool result first; this tool
+    cannot search by name alone. view selects what to return: 'summary'
+    (season stat totals, default), 'career' (career stats by category, most
+    recent season first), 'gamelog' (last num_games games, most recent
+    first), or 'splits' (season splits, e.g. All/Home/Away)."""
+    athlete = resolve_athlete(pro_team, player_name)
+    if athlete is None:
+        return f"No NFL player matched '{player_name}' on team '{pro_team}'."
+    fn = _VIEWS.get(view, _view_summary)
+    return fn(athlete, pro_team, num_games)
 
 
 @tool
@@ -204,10 +191,7 @@ def get_nfl_qbr_leaders(week: int = 0) -> str:
 
 
 TOOLS = [
-    get_nfl_player_summary,
-    get_nfl_player_career_stats,
-    get_nfl_player_gamelog,
-    get_nfl_player_splits,
+    get_nfl_player_stats,
     get_nfl_stat_leaders,
     get_nfl_qbr_leaders,
 ]
