@@ -122,31 +122,58 @@ def get_nfl_player_stats(
     return fn(athlete, pro_team, num_games)
 
 
+# Stat categories relevant to each position, for the position= filter below.
+# ESPN's public leaders feed has no kicking (FG) category at all - not fixable
+# without a per-team roster + per-player overview call for all 32 teams.
+_POSITION_CATEGORIES = {
+    "QB": ["passingYards", "passingTouchdowns", "quarterbackRating", "interceptions"],
+    "RB": ["rushingYards", "rushingTouchdowns"],
+    "WR": ["receivingYards", "receptions", "receivingTouchdowns"],
+    "TE": ["receivingYards", "receptions", "receivingTouchdowns"],
+    "DEF": ["totalTackles", "sacks", "interceptions", "passesDefended"],
+    "ST": ["kickoffYards", "puntYards"],
+}
+
+
 @tool
-def get_nfl_stat_leaders(category: str = "") -> str:
-    """Get real-NFL statistical leaders for the current season (top player
-    per stat category, e.g. passing yards, rushing yards, receiving yards).
+def get_nfl_stat_leaders(category: str = "", position: str = "", limit: int = 1) -> str:
+    """Get real-NFL statistical leaders for the current season, top `limit`
+    player(s) per stat category (default 1 - raise it for a top-N list).
     category optionally filters to one stat by name/abbreviation, e.g.
-    'passing yards' or 'rushingYards' - leave blank to list leaders across
-    all categories."""
+    'passing yards' or 'rushingYards'. position optionally filters to every
+    category relevant to one position instead (QB, RB, WR, TE, DEF, or ST),
+    e.g. position='RB' for rushing yards/TD leaders - use at most one of
+    category/position. Leave both blank to list leaders across all
+    categories. Note: this feed has no kicking (FG) stat category."""
     data = get_json(f"{SITE_API}/statistics")
     categories = data.get("stats", {}).get("categories", [])
-    if category:
+
+    if position:
+        wanted = _POSITION_CATEGORIES.get(position.strip().upper())
+        if not wanted:
+            return (
+                f"No leader categories for position '{position}'. "
+                f"Supported: {', '.join(_POSITION_CATEGORIES)}."
+            )
+        categories = [c for c in categories if c["name"] in wanted]
+    elif category:
         q = category.strip().lower()
         categories = [
             c for c in categories
             if q in c["name"].lower() or q in c["displayName"].lower()
         ]
     if not categories:
-        return f"No stat category matched '{category}'."
+        return f"No stat category matched '{category or position}'."
 
     lines = []
     for cat in categories:
-        leaders = cat.get("leaders", [])
-        if not leaders:
-            continue
-        top = leaders[0]
-        lines.append(f"{cat['displayName']}: {top['athlete']['displayName']} ({top['displayValue']})")
+        leaders = cat.get("leaders", [])[: max(limit, 1)]
+        for entry in leaders:
+            athlete = entry["athlete"]
+            team = athlete.get("team", {}).get("abbreviation", "?")
+            lines.append(
+                f"{cat['displayName']}: {athlete['displayName']} ({team}) - {entry['displayValue']}"
+            )
     if not lines:
         return "No statistical leaders available."
     return "NFL statistical leaders:\n" + "\n".join(lines)
