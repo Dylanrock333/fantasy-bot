@@ -38,7 +38,19 @@ PROMPTS = [
     "is anyone on my team on a bye this week",
     "where do i stand in the standings rn, am i making the playoffs",
     "jaylen warren or rachaad white this week, who do i start",
-    "give me a recap of how my matchup went last week"
+    "give me a recap of how my matchup went last week",
+
+    # Added to exercise tools the prompts above never touch.
+    "how many targets did my WR1 get in his game last week",  # get_game_player_stats
+    "what are the odds and who's broadcasting the Chiefs game this week",  # get_game_odds, get_game_broadcast
+    "who are the officials for the Eagles game and what were the key plays",  # get_game_officials, get_game_key_plays
+    "any recent news on my players or around the league",  # get_player_news, get_nfl_news
+    "what free agent transactions or waiver moves happened recently in the NFL",  # get_nfl_transactions
+    "who's the head coach of the Lions and what's their division look like",  # get_team_coach, get_nfl_divisions
+    "who leads the league in rushing touchdowns and in QBR this week",  # get_nfl_stat_leaders, get_nfl_qbr_leaders
+    "how has Justin Jefferson performed at home vs away, and what's his career year by year",  # get_nfl_player_stats view=splits/career
+    "what are the real NFL standings right now, not my fantasy league",  # get_nfl_standings
+    "how did my draft go and what trades or adds happened in my league",  # get_draft_results, get_recent_activity
 ]
 
 

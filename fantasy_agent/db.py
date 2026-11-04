@@ -21,7 +21,14 @@ class User(Base):
     team_id = Column(Integer, nullable=True)
     team_name = Column(String, nullable=True)
     espn_owner_id = Column(String, nullable=True)
+    espn_s2 = Column(String, nullable=True)
+    swid = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    stripe_customer_id = Column(String, unique=True, nullable=True, index=True)
+    stripe_subscription_id = Column(String, unique=True, nullable=True, index=True)
+    plan_status = Column(String, nullable=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
 
 
 class Chat(Base):
