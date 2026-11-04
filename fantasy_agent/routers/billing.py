@@ -96,6 +96,19 @@ def _find_user_by_customer(db, customer_id: str) -> User | None:
     return db.query(User).filter(User.stripe_customer_id == customer_id).first()
 
 
+def _period_end(sub) -> datetime | None:
+    """current_period_end lives on each subscription item, not the subscription itself,
+    as of the account's current Stripe API version. `sub` may be a webhook event's
+    dict-like payload or a stripe.Subscription SDK object - neither supports .get(),
+    so use bracket access with a KeyError fallback to cover both."""
+    try:
+        items = sub["items"]["data"]
+        end = items[0]["current_period_end"] if items else None
+    except (KeyError, IndexError):
+        end = None
+    return datetime.fromtimestamp(end, tz=timezone.utc) if end else None
+
+
 def _sync_from_checkout(session: dict) -> None:
     db = SessionLocal()
     try:
@@ -111,7 +124,7 @@ def _sync_from_checkout(session: dict) -> None:
         sub = stripe.Subscription.retrieve(session["subscription"])
         user.stripe_subscription_id = sub.id
         user.plan_status = sub.status
-        user.current_period_end = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc)
+        user.current_period_end = _period_end(sub)
         db.commit()
         emit("billing_subscription_started", user_id=user.id, status=sub.status)
     finally:
@@ -127,8 +140,7 @@ def _sync_from_subscription(sub: dict) -> None:
             return
         user.stripe_subscription_id = sub["id"]
         user.plan_status = sub["status"]
-        if sub.get("current_period_end"):
-            user.current_period_end = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc)
+        user.current_period_end = _period_end(sub)
         db.commit()
         emit("billing_subscription_synced", user_id=user.id, status=sub["status"])
     finally:
