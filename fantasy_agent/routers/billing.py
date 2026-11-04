@@ -24,6 +24,9 @@ router = APIRouter()
 
 @router.post("/api/billing/checkout-session")
 async def create_checkout_session(user: User = Depends(get_current_user)):
+    if user.plan_status in ("active", "trialing", "past_due"):
+        raise HTTPException(status_code=400, detail="subscription already active")
+
     db = SessionLocal()
     try:
         if not user.stripe_customer_id:
