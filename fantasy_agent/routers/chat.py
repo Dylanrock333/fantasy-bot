@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from fantasy_agent.auth import get_current_user
+from fantasy_agent.auth import get_subscribed_user
 from fantasy_agent.clients.espn_fantasy_client import current_league_id, current_team_context
 from fantasy_agent.db import User
 from fantasy_agent.logging.trace import emit
@@ -50,7 +50,7 @@ def create_router(graph) -> APIRouter:
 
     # Web path: league_id/team_name come from the authenticated user, not the request.
     @router.post("/api/me/chat")
-    async def me_chat(req: MeChatRequest, user: User = Depends(get_current_user)):
+    async def me_chat(req: MeChatRequest, user: User = Depends(get_subscribed_user)):
         if user.league_id is None:
             raise HTTPException(status_code=400, detail="no league linked to this account")
         return await _run_chat(req.message, user.league_id, user.team_name)

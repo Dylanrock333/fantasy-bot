@@ -28,7 +28,7 @@ from fantasy_agent.graphs.graph import build_graph
 from fantasy_agent.graphs.weekly_recap_graph import build_weekly_recap_graph
 from fantasy_agent.graphs.matchup_preview_graph import build_matchup_preview_graph
 from fantasy_agent.db import init_db
-from fantasy_agent.routers import auth, chat, chats, league, reports
+from fantasy_agent.routers import auth, billing, chat, chats, league, reports
 
 # Graphs are compiled once at import time and shared across requests.
 app = FastAPI()
@@ -56,6 +56,7 @@ async def unhandled_exception_handler(request: Request, err: Exception):
 
 
 app.include_router(auth.router)
+app.include_router(billing.router)
 app.include_router(chat.create_router(graph))
 app.include_router(chats.create_router(graph))
 app.include_router(league.router)

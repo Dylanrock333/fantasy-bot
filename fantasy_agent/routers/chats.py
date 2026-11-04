@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
-from fantasy_agent.auth import get_current_user
+from fantasy_agent.auth import get_current_user, get_subscribed_user
 from fantasy_agent.clients.espn_fantasy_client import current_league_id, current_team_context
 from fantasy_agent.db import Chat, Message, SessionLocal, User
 from fantasy_agent.logging.trace import emit
@@ -100,7 +100,7 @@ def create_router(graph) -> APIRouter:
             db.close()
 
     @router.post("/api/chats/{chat_id}/messages")
-    async def add_message(chat_id: int, req: AddMessageRequest, user: User = Depends(get_current_user)):
+    async def add_message(chat_id: int, req: AddMessageRequest, user: User = Depends(get_subscribed_user)):
         if user.league_id is None:
             raise HTTPException(status_code=400, detail="no league linked to this account")
 
