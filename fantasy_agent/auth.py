@@ -51,3 +51,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(_securi
     if not user:
         raise HTTPException(status_code=401, detail="user not found")
     return user
+
+
+ACTIVE_PLAN_STATUSES = {"active", "trialing"}
+
+
+def get_subscribed_user(user: User = Depends(get_current_user)) -> User:
+    if user.plan_status not in ACTIVE_PLAN_STATUSES:
+        raise HTTPException(status_code=402, detail="active subscription required")
+    return user
