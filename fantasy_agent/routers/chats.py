@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from fantasy_agent.auth import get_current_user
-from fantasy_agent.clients.espn_fantasy_client import current_league_id, current_team_context
+from fantasy_agent.clients.espn_fantasy_client import current_espn_cookies, current_league_id, current_team_context
 from fantasy_agent.db import Chat, Message, SessionLocal, User
 from fantasy_agent.logging.trace import emit
 
@@ -114,6 +114,7 @@ def create_router(graph) -> APIRouter:
 
         current_league_id.set(user.league_id)
         current_team_context.set(user.team_name)
+        current_espn_cookies.set((user.espn_s2, user.swid))
 
         t0 = time.monotonic()
         try:

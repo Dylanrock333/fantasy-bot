@@ -26,7 +26,12 @@ current_league_id: ContextVar[int] = ContextVar("current_league_id")
 # None (not every caller is linked, and some entry points like scripts/ never set it).
 current_team_context: ContextVar[str | None] = ContextVar("current_team_context", default=None)
 
-_leagues: dict[int, tuple[League, float]] = {}
+# Per-user ESPN session cookies, set by routers for authenticated requests. None falls back
+# to the shared ESPN_S2/SWID env vars (the Discord/unauth path, and private-league owner's own
+# league used for local dev).
+current_espn_cookies: ContextVar[tuple[str, str] | None] = ContextVar("current_espn_cookies", default=None)
+
+_leagues: dict[tuple[int, str], tuple[League, float]] = {}
 
 # ESPN lineup slot codes that aren't a starting position outright.
 _SLOT_LABELS = {"BE": "bench", "IR": "IR slot"}
@@ -37,24 +42,31 @@ def slot_label(slot: str) -> str:
     return _SLOT_LABELS.get(slot, f"starting {slot}")
 
 
-def get_league(league_id: int) -> League:
+def get_league(league_id: int, espn_s2: str, swid: str) -> League:
     """Build a fresh authenticated League for this season."""
     return League(
         league_id=league_id,
         year=YEAR,
-        espn_s2=os.environ["ESPN_S2"],
-        swid=os.environ["SWID"],
+        espn_s2=espn_s2,
+        swid=swid,
     )
 
 
 def league_singleton() -> League:
-    """Return the current request's League, refetching when missing or older than TTL_SECONDS."""
+    """Return the current request's League, refetching when missing or older than TTL_SECONDS.
+
+    Cache key includes the cookie since different users can supply different espn_s2/swid for
+    the same numeric league_id - keying on league_id alone would leak one user's cached League
+    (and roster view) to another.
+    """
     league_id = current_league_id.get()
-    cached = _leagues.get(league_id)
+    espn_s2, swid = current_espn_cookies.get() or (os.environ["ESPN_S2"], os.environ["SWID"])
+    cache_key = (league_id, espn_s2)
+    cached = _leagues.get(cache_key)
     if cached is None or time.time() - cached[1] > TTL_SECONDS:
         emit("league_cache_refresh", league_id=league_id, reason="expired" if cached else "first_fetch")
-        cached = (get_league(league_id), time.time())
-        _leagues[league_id] = cached
+        cached = (get_league(league_id, espn_s2, swid), time.time())
+        _leagues[cache_key] = cached
     return cached[0]
 
 
