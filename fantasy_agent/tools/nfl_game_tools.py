@@ -1,7 +1,8 @@
-"""Real-NFL data scoped to one specific game: result, key plays, odds,
-broadcast info, officiating crew, and stat leaders (ESPN's public API),
-not fantasy matchups - see fantasy_matchup_tools.py for that.
-Resolves team+week into a game id, then pulls CDN/Core API game data."""
+"""Real-NFL data scoped to one specific game: result, individual player box
+score stats (incl. receiving targets), key plays, odds, broadcast info,
+officiating crew, and stat leaders (ESPN's public API), not fantasy
+matchups - see fantasy_matchup_tools.py for that. Resolves team+week into a
+game id, then pulls CDN/Core API game data."""
 from langchain_core.tools import tool
 
 from ..clients.espn_nfl_client import CDN_API, CORE_API, get_json, resolve_event
@@ -42,6 +43,36 @@ def get_game_result(team_names: list[str], week: int = 0) -> str:
     teams' games in a given week (defaults to current week). Pass every
     team you need in one call, e.g. team_names=['Cowboys', 'DAL']."""
     return "\n\n".join(_game_result_one(t, week) for t in _dedupe(team_names))
+
+
+def _game_player_stats_one(team_name: str, week: int) -> str:
+    event_id = resolve_event(team_name, week)
+    if event_id is None:
+        return f"No game found for '{team_name}'" + (f" in week {week}." if week else ".")
+
+    data = get_json(f"{CDN_API}/boxscore", xhr=1, gameId=event_id)
+    pkg = data.get("gamepackageJSON", data)
+    lines = []
+    for team in pkg.get("boxscore", {}).get("players", []):
+        lines.append(team["team"]["abbreviation"] + ":")
+        for group in team.get("statistics", []):
+            labels = group.get("labels", [])
+            for ath in group.get("athletes", []):
+                stat_str = ", ".join(f"{l}: {v}" for l, v in zip(labels, ath.get("stats", [])))
+                lines.append(f"  {ath['athlete']['displayName']} ({group['name']}): {stat_str}")
+    if not lines:
+        return f"No per-player stats available for '{team_name}'."
+    return "\n".join(lines)
+
+
+@tool
+def get_game_player_stats(team_names: list[str], week: int = 0) -> str:
+    """Get every individual player's real-NFL box score stat line (passing,
+    rushing, receiving incl. targets, fumbles) for one or more teams' games
+    in a given week (defaults to current week) - this is the one game-level
+    tool that includes receiving targets. Pass every team you need in one
+    call, e.g. team_names=['Cowboys', 'DAL']."""
+    return "\n\n".join(_game_player_stats_one(t, week) for t in _dedupe(team_names))
 
 
 def _game_key_plays_one(team_name: str, week: int) -> str:
@@ -176,6 +207,7 @@ def get_game_leaders(team_names: list[str], week: int = 0) -> str:
 
 TOOLS = [
     get_game_result,
+    get_game_player_stats,
     get_game_key_plays,
     get_game_odds,
     get_game_broadcast,
