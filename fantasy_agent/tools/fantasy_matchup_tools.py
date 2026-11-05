@@ -2,7 +2,7 @@
 league via clients/espn_fantasy_client.py, not real-NFL games)."""
 from langchain_core.tools import tool
 
-from ..clients.espn_fantasy_client import league_singleton, nfl_game_week, slot_label
+from ..clients.espn_fantasy_client import current_team_context, league_singleton, nfl_game_week, slot_label
 
 
 @tool
@@ -20,10 +20,18 @@ def get_matchup_scoreboard(week: int = 0) -> str:
 
 
 @tool
-def get_box_scores(week: int = 0) -> str:
+def get_box_scores(week: int = 0, team_names: list[str] = [], limit: int = 0) -> str:
     """Get full box scores for a given week (defaults to the current week),
     including both teams' complete starting lineups (plus bench/IR) with
-    each player's scored and projected points."""
+    each player's scored and projected points.
+
+    By default this returns EVERY matchup in the league, which is a large
+    response - narrow it whenever the user only cares about one game or a
+    few:
+    - team_names: only return matchups involving these teams (partial match
+      on team name, e.g. 'Cowboys'). Pass [''] for your own team. Leave as
+      [] for every matchup.
+    - limit: only return the first N matchups found (0 = no limit)."""
     league = league_singleton()
     week = week or nfl_game_week()
     try:
@@ -33,6 +41,19 @@ def get_box_scores(week: int = 0) -> str:
                 "hasn't drafted, so ESPN has no roster data.")
     if not box_scores:
         return f"No box scores found for week {week}."
+    if team_names == [""]:
+        own = current_team_context.get() or ""
+        team_names = [own] if own else []
+    if team_names:
+        queries = [q.strip().lower() for q in team_names if q.strip()]
+        box_scores = [
+            b for b in box_scores
+            if any(q in b.home_team.lower() or q in b.away_team.lower() for q in queries)
+        ]
+        if not box_scores:
+            return f"No matchup found for {', '.join(team_names)} in week {week}."
+    if limit:
+        box_scores = box_scores[:limit]
     blocks = []
     for b in box_scores:
         header = (f"{b.home_team} {b.home_score} ({b.home_projected} proj) - "

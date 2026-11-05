@@ -42,7 +42,9 @@ def create_router(graph) -> APIRouter:
         t0 = time.monotonic()
         try:
             # to_thread copies contextvars, so current_league_id reaches the worker thread.
-            result = await asyncio.to_thread(graph.invoke, {"messages": messages})
+            result = await asyncio.to_thread(
+                graph.invoke, {"messages": messages}, config={"recursion_limit": 30}
+            )
         except Exception as err:
             emit("error", route="chat", error=str(err))
             raise HTTPException(status_code=500, detail="internal server error")
